@@ -100,10 +100,9 @@ Use exatamente estas chaves:
 '''
 
 MODELS = [
-    ('gemini-3.8-flash', 4),
-    ('gemini-3.7-flash', 2),
-    ('gemini-3.6-flash', 2),
-    ('gemini-3.5-flash', 1),
+    ('gemini-3.8-flash', 1),
+    ('gemini-3.7-flash', 1),
+    ('gemini-3.6-flash', 1),
 ]
 
 
@@ -148,7 +147,7 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type):
                 method='POST'
             )
             try:
-                with urllib.request.urlopen(req, timeout=120) as response:
+                with urllib.request.urlopen(req, timeout=18) as response:
                     body = response.read().decode('utf-8')
                 obj = json.loads(body)
                 text = obj['candidates'][0]['content']['parts'][0]['text'].strip()
@@ -164,15 +163,15 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type):
                 detail = e.read().decode('utf-8', errors='replace')
                 last_error = f'{model} HTTP {e.code}: {detail[:500]}'
                 if e.code in (429, 500, 502, 503, 504):
-                    time.sleep(4 + attempt * 3)
+                    time.sleep(1)
                     continue
                 raise RuntimeError(last_error)
             except (urllib.error.URLError, TimeoutError) as e:
                 last_error = f'{model}: {e}'
-                time.sleep(4 + attempt * 3)
+                time.sleep(1)
             except (KeyError, IndexError, TypeError, json.JSONDecodeError) as e:
                 last_error = f'{model}: resposta inválida ({e})'
-                time.sleep(2)
+                time.sleep(1)
     raise RuntimeError(last_error or 'Não foi possível obter resposta do Gemini.')
 
 
