@@ -7,7 +7,7 @@ import urllib.error
 from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 GEMINI_PROMPT = r'''Você é um analista técnico especializado em leitura MULTI-TIMEFRAME de gráficos,
 seguindo exatamente esta metodologia:
@@ -154,6 +154,11 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type):
                 text = obj['candidates'][0]['content']['parts'][0]['text'].strip()
                 if text.startswith('```'):
                     text = text.replace('```json', '', 1).replace('```', '', 1).strip()
+                # Gemini may occasionally add a stray character before/after JSON.
+                start = text.find('{')
+                end = text.rfind('}')
+                if start >= 0 and end > start:
+                    text = text[start:end + 1]
                 return json.loads(text)
             except urllib.error.HTTPError as e:
                 detail = e.read().decode('utf-8', errors='replace')
@@ -195,7 +200,9 @@ function setup(id,key,drop){const input=document.getElementById(id), box=documen
 function show(box,file){const r=new FileReader();r.onload=e=>box.innerHTML='<img src="'+e.target.result+'" alt="gráfico">';r.readAsDataURL(file)}
 function check(){document.getElementById('go').disabled=!(files.h1&&files.m15)}
 setup('h1','h1','dh1');setup('m15','m15','dm15');
-document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, estrutura, zona e primeiro obstáculo...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);try{const r=await fetch('/analisar',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Erro na análise');render(d);status.textContent='• ANÁLISE CONCLUÍDA'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
+document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, estrutura, zona e primeiro obstáculo...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);try{const r=await fetch('/analisar',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro em vez de JSON. Tente novamente em alguns segundos.
+
+Detalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro na análise');render(d);status.textContent='• ANÁLISE CONCLUÍDA'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
 function render(d){const dir=(d.direcao_a_procurar||'AGUARDAR').toUpperCase();const cls=dir==='COMPRA'?'buy':dir==='VENDA'?'sell':'wait';const esc=x=>String(x??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));document.getElementById('out').innerHTML='<div class="result" style="display:block"><div class="hero"><div class="metric"><span>Direção a procurar</span><strong class="'+cls+'">'+esc(dir)+'</strong></div><div class="metric"><span>Zona de interesse</span><strong>'+esc(d.zona_de_interesse)+'</strong></div><div class="metric"><span>Primeiro obstáculo</span><strong>'+esc(d.primeiro_obstaculo)+'</strong></div></div><div class="sections"><div class="box"><h3>H1 — CONTEXTO</h3><p><b>Contexto:</b> '+esc(d.h1?.contexto)+'</p><p><b>Estrutura:</b> '+esc(d.h1?.estrutura)+'</p><p><b>Fase:</b> '+esc(d.h1?.fase)+'</p><p><b>Níveis:</b> '+esc(d.h1?.principais_niveis)+'</p></div><div class="box"><h3>M15 — ESTRUTURA / REGIÃO</h3><p><b>Contexto:</b> '+esc(d.m15?.contexto)+'</p><p><b>Estrutura:</b> '+esc(d.m15?.estrutura)+'</p><p><b>Fase:</b> '+esc(d.m15?.fase)+'</p><p><b>Região:</b> '+esc(d.m15?.regiao_importante)+'</p><p><b>Relação H1:</b> '+esc(d.m15?.relacao_com_h1)+'</p></div><div class="box"><h3>POR QUE ESSA ZONA</h3><p>'+esc(d.por_que_essa_zona)+'</p></div><div class="box"><h3>M5 — ENTRADA MANUAL</h3><p>'+esc(d.m5_manual)+'</p></div><div class="box"><h3>RESULTADO</h3><p>'+esc(d.resultado)+'</p><p><b>Confiança:</b> '+esc(d.confianca)+'</p></div></div></div>'}
 </script></body></html>'''
 
@@ -214,6 +221,14 @@ def analisar():
         return jsonify(result)
     except Exception as e:
         return jsonify(error=str(e)), 502
+
+@app.errorhandler(413)
+def too_large(_e):
+    return jsonify(error='As imagens são muito grandes. Use imagens de até 50 MB no total.'), 413
+
+@app.errorhandler(500)
+def internal_error(_e):
+    return jsonify(error='Erro interno no servidor durante a análise. Tente novamente.'), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', '5000')), debug=False)
