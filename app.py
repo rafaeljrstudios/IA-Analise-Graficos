@@ -100,10 +100,25 @@ Use exatamente estas chaves:
 '''
 
 MODELS = [
-    ('gemini-3.8-flash', 1),
-    ('gemini-3.7-flash', 1),
-    ('gemini-3.6-flash', 1),
+    # Ordem pensada para priorizar disponibilidade e manter boa qualidade multimodal.
+    ('gemini-3.7-flash', 2),
+    ('gemini-3.8-flash', 2),
+    ('gemini-3.5-flash-lite', 1),
 ]
+
+REQUEST_TIMEOUT = 16
+
+
+def retry_delay(response_headers, attempt):
+    # Respeita Retry-After quando a API informar. Caso contrário, usa
+    # um pequeno backoff para não martelar a API em caso de 503/429.
+    try:
+        retry_after = int(response_headers.get('Retry-After', '0'))
+        if retry_after > 0:
+            return min(retry_after, 8)
+    except Exception:
+        pass
+    return 2 + (attempt * 3)
 
 
 def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type):
@@ -143,36 +158,59 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type):
             req = urllib.request.Request(
                 url,
                 data=raw,
-                headers={'Content-Type': 'application/json', 'x-goog-api-key': chave},
+                headers={
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': chave,
+                    'User-Agent': 'IA-Analise-Graficos/1.0'
+                },
                 method='POST'
             )
             try:
-                with urllib.request.urlopen(req, timeout=18) as response:
+                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
                     body = response.read().decode('utf-8')
                 obj = json.loads(body)
                 text = obj['candidates'][0]['content']['parts'][0]['text'].strip()
                 if text.startswith('```'):
                     text = text.replace('```json', '', 1).replace('```', '', 1).strip()
-                # Gemini may occasionally add a stray character before/after JSON.
                 start = text.find('{')
                 end = text.rfind('}')
                 if start >= 0 and end > start:
                     text = text[start:end + 1]
-                return json.loads(text)
+                result = json.loads(text)
+                return result
+
             except urllib.error.HTTPError as e:
                 detail = e.read().decode('utf-8', errors='replace')
-                last_error = f'{model} HTTP {e.code}: {detail[:500]}'
+                last_error = f'{model} HTTP {e.code}: {detail[:700]}'
+
+                # 429/5xx são transitórios. Tentamos novamente com backoff e,
+                # depois, passamos ao próximo modelo da lista.
                 if e.code in (429, 500, 502, 503, 504):
-                    time.sleep(1)
-                    continue
+                    if attempt < retries - 1:
+                        time.sleep(retry_delay(e.headers, attempt))
+                        continue
+                    break
                 raise RuntimeError(last_error)
+
             except (urllib.error.URLError, TimeoutError) as e:
                 last_error = f'{model}: {e}'
-                time.sleep(1)
+                if attempt < retries - 1:
+                    time.sleep(retry_delay({}, attempt))
+                    continue
+                break
+
             except (KeyError, IndexError, TypeError, json.JSONDecodeError) as e:
                 last_error = f'{model}: resposta inválida ({e})'
-                time.sleep(1)
-    raise RuntimeError(last_error or 'Não foi possível obter resposta do Gemini.')
+                if attempt < retries - 1:
+                    time.sleep(2)
+                    continue
+                break
+
+    raise RuntimeError(
+        'Gemini temporariamente indisponível após tentativas nos modelos de reserva. '
+        'Tente novamente em alguns segundos. Último detalhe: ' +
+        (last_error or 'sem detalhe')
+    )
 
 
 HTML = r'''<!doctype html>
