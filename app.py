@@ -15,7 +15,7 @@ seguindo exatamente esta metodologia:
 SEQUÊNCIA:
 H1 → contexto e direção
 M15 → estrutura + região + confirmação do contexto
-M5 → NÃO É ANALISADO AUTOMATICAMENTE. A entrada no M5 será manual.
+M5 → análise visual da rejeição, confirmação, gatilho, invalidação, stop técnico e alvo.
 
 REGRAS FUNDAMENTAIS:
 1. H1 define o contexto principal.
@@ -36,7 +36,13 @@ REGRAS FUNDAMENTAIS:
 11. Não invente preços que não estejam visíveis. Se a escala não permitir
     precisão, use uma faixa aproximada e deixe isso claro.
 12. Não use R:R como se pudesse ser calculado com precisão apenas pelas imagens.
-13. Não invente análise de M5, rejeição, confirmação ou gatilho.
+13. Analise a imagem M5 enviada, mas descreva somente evidências realmente visíveis.
+14. Uma foto é um recorte estático: não presuma candles anteriores/posteriores que não aparecem.
+15. Não declare entrada pronta se a rejeição, confirmação e gatilho não estiverem claramente visíveis.
+16. Se preços/escala não forem legíveis, não invente valores de zona, stop ou alvo; diga que não é possível estimar com precisão.
+17. Stop técnico deve ficar além do nível que invalida a hipótese, não em distância arbitrária.
+18. Avalie o espaço até o primeiro obstáculo; se o alvo estiver bloqueado ou o risco/retorno não compensar, descarte a entrada.
+19. Não prometa taxa de acerto nem classifique a operação como garantida.
 
 LEITURA DO H1:
 - Identifique direção/contexto dominante.
@@ -66,11 +72,17 @@ PRIMEIRO OBSTÁCULO:
 - Para VENDA, procure o primeiro suporte relevante abaixo da zona.
 - Não pule um obstáculo evidente.
 
-M5 MANUAL:
-- Apenas explique o que deverá ser procurado quando o preço chegar à zona.
-- Compra: rejeição compradora → confirmação → rompimento da máxima da confirmação.
-- Venda: rejeição vendedora → confirmação → rompimento da mínima da confirmação.
-- Não diga que esses eventos aconteceram, porque não existe foto do M5.
+ANÁLISE M5 (A IMAGEM M5 ESTÁ DISPONÍVEL):
+- Compare o preço visível com a zona de interesse do M15.
+- Identifique se o preço está FORA DA ZONA, NA ZONA ou se já se afastou dela.
+- Para COMPRA: procure rejeição compradora, candle de confirmação e rompimento da máxima da confirmação.
+- Para VENDA: procure rejeição vendedora, candle de confirmação e rompimento da mínima da confirmação.
+- Distinga rejeição, confirmação e gatilho; não trate pavio isolado como gatilho suficiente.
+- Procure falso rompimento/varredura de liquidez, estrutura local, e suporte/resistência próximo contra a operação.
+- Dê uma zona refinada somente se os preços estiverem legíveis; ela deve ser uma faixa, não falsa precisão.
+- Informe stop técnico/invalidação e alvo potencial apenas quando níveis visíveis sustentarem a estimativa.
+- Se faltar evidência, responda AGUARDAR e diga o que precisa acontecer.
+- A decisão é um plano condicional, não uma garantia de resultado.
 
 FORMATO OBRIGATÓRIO:
 Responda SOMENTE com JSON válido, sem markdown, sem ``` e sem texto antes/depois.
@@ -93,7 +105,19 @@ Use exatamente estas chaves:
   "zona_de_interesse": "",
   "primeiro_obstaculo": "",
   "por_que_essa_zona": "",
-  "m5_manual": "",
+  "m5": {
+    "situacao_na_zona": "",
+    "rejeicao": "",
+    "confirmacao": "",
+    "gatilho": "",
+    "zona_refinada": "",
+    "stop_tecnico": "",
+    "alvo_potencial": "",
+    "invalidacao": "",
+    "obstaculos_proximos": "",
+    "decisao": "AGUARDAR | GATILHO IDENTIFICADO | ENTRADA DESCARTADA",
+    "justificativa": ""
+  },
   "resultado": "",
   "confianca": "BAIXA | MÉDIA | ALTA"
 }
@@ -121,7 +145,7 @@ def retry_delay(response_headers, attempt):
     return 2 + (attempt * 3)
 
 
-def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type):
+def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
     chave = os.getenv('GEMINI_API_KEY', '').strip()
     if not chave:
         raise RuntimeError('GEMINI_API_KEY não configurada no servidor.')
@@ -141,6 +165,8 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type):
                 part(h1_bytes, h1_type),
                 {'text': '\n\nIMAGEM M15:'},
                 part(m15_bytes, m15_type),
+                {'text': '\n\nIMAGEM M5 — analise rejeição, confirmação e gatilho com base somente nesta imagem:'},
+                part(m5_bytes, m5_type),
             ]
         }],
         'generationConfig': {
@@ -221,24 +247,38 @@ HTML = r'''<!doctype html>
 <title>IA DE ANÁLISE MULTI-TIMEFRAME</title>
 <style>
 :root{--bg:#050B16;--panel:#081321;--panel2:#0B192A;--border:#183451;--cyan:#00D9FF;--blue:#1677FF;--purple:#A855F7;--magenta:#FF3DDE;--green:#00F59B;--red:#FF3158;--yellow:#FFD166;--text:#F4F8FF;--muted:#8EA5BE}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0%,#0b1930 0,#050B16 40%,#030711 100%);color:var(--text);font-family:Segoe UI,Arial,sans-serif;min-height:100vh}.wrap{max-width:1450px;margin:auto;padding:28px}.header{text-align:center;margin-bottom:24px}.title{font-size:38px;font-weight:800;letter-spacing:1px}.sub{color:var(--cyan);font-weight:600;margin-top:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:linear-gradient(180deg,#091525,#06101d);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 0 30px #0008}.card.h1{border-color:#00d9ff88}.card.m15{border-color:#ff3dde88}.head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}.head b{font-size:18px}.tag{font-size:12px;color:var(--muted)}.body{padding:18px}.drop{height:310px;border:1px dashed #31506f;border-radius:12px;background:#06101c;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}.drop:hover{border-color:var(--cyan);box-shadow:inset 0 0 30px #00d9ff10}.drop img{max-width:100%;max-height:100%;object-fit:contain}.placeholder{text-align:center;color:var(--muted)}.placeholder strong{display:block;color:var(--text);font-size:17px;margin-bottom:6px}.actions{text-align:center;margin:20px 0}.btn{border:0;border-radius:10px;padding:13px 20px;font-weight:800;cursor:pointer;background:var(--green);color:#03100c;box-shadow:0 0 24px #00f59b22}.btn:disabled{opacity:.5;cursor:not-allowed}.status{color:var(--muted);font-size:13px;margin-top:10px}.analysis{grid-column:1/-1;border:1px solid var(--purple);background:linear-gradient(180deg,#091525,#060d19);border-radius:16px;box-shadow:0 0 30px #a855f722}.analysis .head{border-color:#a855f744}.result{padding:18px;display:none}.hero{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.metric{padding:15px;border:1px solid var(--border);border-radius:12px;background:#07111f}.metric span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase}.metric strong{display:block;font-size:22px;margin-top:6px}.buy{color:var(--green)}.sell{color:var(--red)}.wait{color:var(--yellow)}.sections{display:grid;grid-template-columns:1fr 1fr;gap:12px}.box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:15px}.box h3{margin:0 0 10px;color:var(--cyan);font-size:14px}.box p{margin:7px 0;color:#d9e5f5;line-height:1.45}.footer{text-align:center;color:var(--green);font-size:12px;margin-top:18px}.err{color:#ff8fa3;padding:18px;white-space:pre-wrap}.loading{color:var(--cyan);padding:18px;text-align:center}@media(max-width:900px){.grid,.sections{grid-template-columns:1fr}.hero{grid-template-columns:1fr}.title{font-size:28px}.wrap{padding:14px}}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0%,#0b1930 0,#050B16 40%,#030711 100%);color:var(--text);font-family:Segoe UI,Arial,sans-serif;min-height:100vh}.wrap{max-width:1450px;margin:auto;padding:28px}.header{text-align:center;margin-bottom:24px}.title{font-size:38px;font-weight:800;letter-spacing:1px}.sub{color:var(--cyan);font-weight:600;margin-top:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:linear-gradient(180deg,#091525,#06101d);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 0 30px #0008}.card.h1{border-color:#00d9ff88}.card.m15{border-color:#ff3dde88}.card.m5{border-color:#00f59b88}.head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}.head b{font-size:18px}.tag{font-size:12px;color:var(--muted)}.body{padding:18px}.drop{height:310px;border:1px dashed #31506f;border-radius:12px;background:#06101c;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}.drop:hover{border-color:var(--cyan);box-shadow:inset 0 0 30px #00d9ff10}.drop img{max-width:100%;max-height:100%;object-fit:contain}.placeholder{text-align:center;color:var(--muted)}.placeholder strong{display:block;color:var(--text);font-size:17px;margin-bottom:6px}.actions{text-align:center;margin:20px 0}.btn{border:0;border-radius:10px;padding:13px 20px;font-weight:800;cursor:pointer;background:var(--green);color:#03100c;box-shadow:0 0 24px #00f59b22}.btn:disabled{opacity:.5;cursor:not-allowed}.status{color:var(--muted);font-size:13px;margin-top:10px}.analysis{grid-column:1/-1;border:1px solid var(--purple);background:linear-gradient(180deg,#091525,#060d19);border-radius:16px;box-shadow:0 0 30px #a855f722}.analysis .head{border-color:#a855f744}.result{padding:18px;display:none}.hero{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.metric{padding:15px;border:1px solid var(--border);border-radius:12px;background:#07111f}.metric span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase}.metric strong{display:block;font-size:22px;margin-top:6px}.buy{color:var(--green)}.sell{color:var(--red)}.wait{color:var(--yellow)}.sections{display:grid;grid-template-columns:1fr 1fr;gap:12px}.box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:15px}.box h3{margin:0 0 10px;color:var(--cyan);font-size:14px}.box p{margin:7px 0;color:#d9e5f5;line-height:1.45}.footer{text-align:center;color:var(--green);font-size:12px;margin-top:18px}.err{color:#ff8fa3;padding:18px;white-space:pre-wrap}.loading{color:var(--cyan);padding:18px;text-align:center}@media(max-width:900px){.grid,.sections{grid-template-columns:1fr}.hero{grid-template-columns:1fr}.title{font-size:28px}.wrap{padding:14px}}
 </style></head>
 <body><div class="wrap">
 <header class="header"><div class="title">IA DE ANÁLISE MULTI-TIMEFRAME</div><div class="sub">H1 → DIREÇÃO / CONTEXTO &nbsp; | &nbsp; M15 → REGIÃO / ESTRUTURA &nbsp; | &nbsp; M5 → REJEIÇÃO / CONFIRMAÇÃO / GATILHO</div></header>
 <div class="grid">
 <section class="card h1"><div class="head"><b>H1</b><span class="tag">DIREÇÃO / CONTEXTO</span></div><div class="body"><input id="h1" type="file" accept="image/*" hidden><div class="drop" id="dh1"><div class="placeholder"><strong>＋ ADICIONAR H1</strong>Clique aqui para selecionar o gráfico</div></div></div></section>
 <section class="card m15"><div class="head"><b>M15</b><span class="tag">REGIÃO / ESTRUTURA</span></div><div class="body"><input id="m15" type="file" accept="image/*" hidden><div class="drop" id="dm15"><div class="placeholder"><strong>＋ ADICIONAR M15</strong>Clique aqui para selecionar o gráfico</div></div></div></section>
-<div class="actions" style="grid-column:1/-1"><button class="btn" id="go" disabled>ANALISAR H1 + M15</button><div class="status" id="status">• SISTEMA PRONTO</div></div>
-<section class="analysis"><div class="head"><b>ANÁLISE DA IA</b><span class="tag">GEMINI VISION</span></div><div id="out"><div class="loading">Adicione H1 e M15 para iniciar a análise.</div></div></section>
-</div><div class="footer">M5 é entrada manual: aguarde o preço chegar à zona indicada pela análise.</div></div>
+<section class="card m5"><div class="head"><b>M5</b><span class="tag">REJEIÇÃO / CONFIRMAÇÃO / GATILHO</span></div><div class="body"><input id="m5" type="file" accept="image/*" hidden><div class="drop" id="dm5"><div class="placeholder"><strong>＋ ADICIONAR M5</strong>Mostre a zona e os candles recentes</div></div></div></section>
+<div class="actions" style="grid-column:1/-1"><button class="btn" id="go" disabled>ANALISAR H1 + M15 + M5</button><div class="status" id="status">• SISTEMA PRONTO</div></div>
+<section class="analysis"><div class="head"><b>ANÁLISE DA IA</b><span class="tag">GEMINI VISION</span></div><div id="out"><div class="loading">Adicione H1, M15 e M5 para montar o plano de entrada.</div></div></section>
+</div><div class="footer">O plano M5 é condicional: confirme os níveis no gráfico e não trate a análise como garantia de resultado.</div></div>
 <script>
-let files={h1:null,m15:null};
+let files={h1:null,m15:null,m5:null};
 function setup(id,key,drop){const input=document.getElementById(id), box=document.getElementById(drop);box.onclick=()=>input.click();input.onchange=()=>{files[key]=input.files[0];show(box,input.files[0]);check()}}
 function show(box,file){const r=new FileReader();r.onload=e=>box.innerHTML='<img src="'+e.target.result+'" alt="gráfico">';r.readAsDataURL(file)}
-function check(){document.getElementById('go').disabled=!(files.h1&&files.m15)}
-setup('h1','h1','dh1');setup('m15','m15','dm15');
-document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, estrutura, zona e primeiro obstáculo...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);try{const r=await fetch('/analisar',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro em vez de JSON. Tente novamente em alguns segundos.\n\nDetalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro na análise');render(d);status.textContent='• ANÁLISE CONCLUÍDA'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
-function render(d){const dir=(d.direcao_a_procurar||'AGUARDAR').toUpperCase();const cls=dir==='COMPRA'?'buy':dir==='VENDA'?'sell':'wait';const esc=x=>String(x??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));document.getElementById('out').innerHTML='<div class="result" style="display:block"><div class="hero"><div class="metric"><span>Direção a procurar</span><strong class="'+cls+'">'+esc(dir)+'</strong></div><div class="metric"><span>Zona de interesse</span><strong>'+esc(d.zona_de_interesse)+'</strong></div><div class="metric"><span>Primeiro obstáculo</span><strong>'+esc(d.primeiro_obstaculo)+'</strong></div></div><div class="sections"><div class="box"><h3>H1 — CONTEXTO</h3><p><b>Contexto:</b> '+esc(d.h1?.contexto)+'</p><p><b>Estrutura:</b> '+esc(d.h1?.estrutura)+'</p><p><b>Fase:</b> '+esc(d.h1?.fase)+'</p><p><b>Níveis:</b> '+esc(d.h1?.principais_niveis)+'</p></div><div class="box"><h3>M15 — ESTRUTURA / REGIÃO</h3><p><b>Contexto:</b> '+esc(d.m15?.contexto)+'</p><p><b>Estrutura:</b> '+esc(d.m15?.estrutura)+'</p><p><b>Fase:</b> '+esc(d.m15?.fase)+'</p><p><b>Região:</b> '+esc(d.m15?.regiao_importante)+'</p><p><b>Relação H1:</b> '+esc(d.m15?.relacao_com_h1)+'</p></div><div class="box"><h3>POR QUE ESSA ZONA</h3><p>'+esc(d.por_que_essa_zona)+'</p></div><div class="box"><h3>M5 — ENTRADA MANUAL</h3><p>'+esc(d.m5_manual)+'</p></div><div class="box"><h3>RESULTADO</h3><p>'+esc(d.resultado)+'</p><p><b>Confiança:</b> '+esc(d.confianca)+'</p></div></div></div>'}
+function check(){document.getElementById('go').disabled=!(files.h1&&files.m15&&files.m5)}
+setup('h1','h1','dh1');setup('m15','m15','dm15');setup('m5','m5','dm5');
+document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 + M5 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, zona e plano de entrada M5...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);fd.append('m5',files.m5);try{const r=await fetch('/analisar',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro em vez de JSON. Tente novamente em alguns segundos.\n\nDetalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro na análise');render(d);status.textContent='• ANÁLISE CONCLUÍDA'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
+function render(d){
+ const dir=(d.direcao_a_procurar||'AGUARDAR').toUpperCase();
+ const cls=dir==='COMPRA'?'buy':dir==='VENDA'?'sell':'wait';
+ const esc=x=>String(x??'—').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+ const m=d.m5||{};
+ const card=(title,body)=>'<div class="box"><h3>'+title+'</h3>'+body+'</div>';
+ const line=(label,value)=>'<p><b>'+label+':</b> '+esc(value)+'</p>';
+ document.getElementById('out').innerHTML='<div class="result" style="display:block"><div class="hero"><div class="metric"><span>Direção a procurar</span><strong class="'+cls+'">'+esc(dir)+'</strong></div><div class="metric"><span>Zona de interesse M15</span><strong>'+esc(d.zona_de_interesse)+'</strong></div><div class="metric"><span>Primeiro obstáculo</span><strong>'+esc(d.primeiro_obstaculo)+'</strong></div></div><div class="sections">'+
+ card('H1 — CONTEXTO',line('Contexto',d.h1?.contexto)+line('Estrutura',d.h1?.estrutura)+line('Fase',d.h1?.fase)+line('Níveis',d.h1?.principais_niveis))+
+ card('M15 — ESTRUTURA / REGIÃO',line('Contexto',d.m15?.contexto)+line('Estrutura',d.m15?.estrutura)+line('Fase',d.m15?.fase)+line('Região',d.m15?.regiao_importante)+line('Relação com H1',d.m15?.relacao_com_h1))+
+ card('POR QUE ESSA ZONA','<p>'+esc(d.por_que_essa_zona)+'</p>')+
+ card('M5 — PLANO DE ENTRADA',line('Decisão',m.decisao)+line('Situação na zona',m.situacao_na_zona)+line('Rejeição',m.rejeicao)+line('Confirmação',m.confirmacao)+line('Gatilho',m.gatilho)+line('Zona refinada',m.zona_refinada)+line('Stop técnico',m.stop_tecnico)+line('Alvo potencial',m.alvo_potencial)+line('Invalidação',m.invalidacao)+line('Obstáculos próximos',m.obstaculos_proximos)+line('Justificativa',m.justificativa))+
+ card('RESULTADO E CONFIANÇA',line('Resumo',d.resultado)+line('Confiança visual',d.confianca))+'</div></div>';
+}
 </script></body></html>'''
 
 @app.get('/')
@@ -249,10 +289,11 @@ def index():
 def analisar():
     h1 = request.files.get('h1')
     m15 = request.files.get('m15')
-    if not h1 or not m15:
-        return jsonify(error='Envie as imagens H1 e M15.'), 400
+    m5 = request.files.get('m5')
+    if not h1 or not m15 or not m5:
+        return jsonify(error='Envie as três imagens: H1, M15 e M5.'), 400
     try:
-        result = gemini_analisar(h1.read(), h1.mimetype, m15.read(), m15.mimetype)
+        result = gemini_analisar(h1.read(), h1.mimetype, m15.read(), m15.mimetype, m5.read(), m5.mimetype)
         return jsonify(result)
     except Exception as e:
         return jsonify(error=str(e)), 502
