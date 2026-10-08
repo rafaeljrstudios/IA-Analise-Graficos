@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import base64
 import time
 import urllib.request
@@ -130,7 +131,7 @@ MODELS = [
     ('gemini-3.5-flash-lite', 1),
 ]
 
-REQUEST_TIMEOUT = 16
+REQUEST_TIMEOUT = 60
 
 
 def retry_delay(response_headers, attempt):
@@ -202,7 +203,48 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
                 end = text.rfind('}')
                 if start >= 0 and end > start:
                     text = text[start:end + 1]
-                result = json.loads(text)
+
+                # Corrige a falha comum do modelo: vírgula antes de } ou ].
+                # A expressão evita alterar vírgulas dentro de strings JSON.
+                def remover_virgulas_finais(valor):
+                    saida = []
+                    dentro_string = False
+                    escape = False
+                    i = 0
+                    while i < len(valor):
+                        ch = valor[i]
+                        if dentro_string:
+                            saida.append(ch)
+                            if escape:
+                                escape = False
+                            elif ch == '\\':
+                                escape = True
+                            elif ch == '"':
+                                dentro_string = False
+                            i += 1
+                            continue
+                        if ch == '"':
+                            dentro_string = True
+                            saida.append(ch)
+                            i += 1
+                            continue
+                        if ch == ',':
+                            j = i + 1
+                            while j < len(valor) and valor[j].isspace():
+                                j += 1
+                            if j < len(valor) and valor[j] in '}]':
+                                i += 1
+                                continue
+                        saida.append(ch)
+                        i += 1
+                    return ''.join(saida)
+
+                try:
+                    result = json.loads(text)
+                except json.JSONDecodeError:
+                    result = json.loads(remover_virgulas_finais(text))
+                if not isinstance(result, dict):
+                    raise ValueError('A resposta do Gemini não veio como objeto JSON.')
                 return result
 
             except urllib.error.HTTPError as e:
