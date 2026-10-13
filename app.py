@@ -281,6 +281,68 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
     )
 
 
+M5_UPDATE_PROMPT = r'''Você é um analista técnico de Forex atualizando um plano já existente usando uma nova captura do M5.
+Você receberá o JSON da análise principal H1/M15/M5 e uma NOVA imagem M5.
+Não refaça nem apague o contexto H1/M15 original. Use-o como referência, mas avalie a situação atual do preço com honestidade.
+Identifique se a zona antiga ainda vale, se houve rompimento, falso rompimento, pullback ou mudança da estrutura local. Não force a direção original se o preço a invalidou. Um movimento contrário no M5 pode ser correção, não declare reversão sem evidência.
+Procure novas zonas refinadas somente se visíveis. Informe gatilho, stop técnico além da invalidação, alvo potencial e obstáculos. Se não houver evidência suficiente, AGUARDAR. Não invente preços nem candles não mostrados. O plano é condicional, não garantia.
+Responda SOMENTE JSON válido com estas chaves: direcao_a_procurar, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, obstaculos_proximos, decisao, justificativa), resultado, confianca, resumo_atualizacao.
+'''
+
+def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type):
+    chave = os.getenv('GEMINI_API_KEY', '').strip()
+    if not chave:
+        raise RuntimeError('GEMINI_API_KEY não configurada no servidor.')
+    parte = {'inline_data': {'mime_type': m5_type or 'image/png', 'data': base64.b64encode(m5_bytes).decode('ascii')}}
+    payload = {
+        'contents': [{'parts': [
+            {'text': M5_UPDATE_PROMPT + '\n\nANÁLISE PRINCIPAL SALVA (JSON):\n' + json.dumps(analise_principal, ensure_ascii=False) + '\n\nNOVA IMAGEM M5 — use esta imagem como estado atual do preço:'},
+            parte
+        ]}],
+        'generationConfig': {'temperature': 0.15, 'responseMimeType': 'application/json'}
+    }
+    raw = json.dumps(payload).encode('utf-8')
+    last_error = None
+    for model, retries in MODELS:
+        url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent'
+        for attempt in range(retries):
+            req = urllib.request.Request(url, data=raw, headers={'Content-Type':'application/json','x-goog-api-key':chave,'User-Agent':'IA-Analise-Graficos/1.0'}, method='POST')
+            try:
+                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                    obj = json.loads(response.read().decode('utf-8'))
+                txt = obj['candidates'][0]['content']['parts'][0]['text'].strip()
+                if txt.startswith('```'):
+                    txt = txt.replace('```json','',1).replace('```','',1).strip()
+                a, b = txt.find('{'), txt.rfind('}')
+                if a >= 0 and b > a:
+                    txt = txt[a:b+1]
+                try:
+                    upd = json.loads(txt)
+                except json.JSONDecodeError:
+                    txt = re.sub(r',\\s*([}\\]])', r'\\1', txt)
+                    upd = json.loads(txt)
+                if not isinstance(upd, dict) or not isinstance(upd.get('m5'), dict):
+                    raise ValueError('Resposta de atualização sem o plano M5 esperado.')
+                merged = dict(analise_principal)
+                for key in ('direcao_a_procurar','zona_de_interesse','primeiro_obstaculo','por_que_essa_zona','resultado','confianca'):
+                    if key in upd:
+                        merged[key] = upd[key]
+                merged['m5'] = upd['m5']
+                merged['resumo_atualizacao'] = upd.get('resumo_atualizacao', 'Plano M5 atualizado com a nova imagem.')
+                return merged
+            except urllib.error.HTTPError as e:
+                last_error = f'{model} HTTP {e.code}: {e.read().decode("utf-8", errors="replace")[:500]}'
+                if e.code in (429,500,502,503,504) and attempt < retries-1:
+                    time.sleep(retry_delay(e.headers, attempt)); continue
+                break
+            except (urllib.error.URLError, TimeoutError, KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError) as e:
+                last_error = f'{model}: {e}'
+                if attempt < retries-1:
+                    time.sleep(2); continue
+                break
+    raise RuntimeError('Não foi possível atualizar o M5. Tente novamente. Detalhe: ' + (last_error or 'sem detalhe'))
+
+
 HTML = r'''<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -297,16 +359,26 @@ HTML = r'''<!doctype html>
 <section class="card h1"><div class="head"><b>H1</b><span class="tag">DIREÇÃO / CONTEXTO</span></div><div class="body"><input id="h1" type="file" accept="image/*" hidden><div class="drop" id="dh1"><div class="placeholder"><strong>＋ ADICIONAR H1</strong>Clique aqui para selecionar o gráfico</div></div></div></section>
 <section class="card m15"><div class="head"><b>M15</b><span class="tag">REGIÃO / ESTRUTURA</span></div><div class="body"><input id="m15" type="file" accept="image/*" hidden><div class="drop" id="dm15"><div class="placeholder"><strong>＋ ADICIONAR M15</strong>Clique aqui para selecionar o gráfico</div></div></div></section>
 <section class="card m5"><div class="head"><b>M5</b><span class="tag">REJEIÇÃO / CONFIRMAÇÃO / GATILHO</span></div><div class="body"><input id="m5" type="file" accept="image/*" hidden><div class="drop" id="dm5"><div class="placeholder"><strong>＋ ADICIONAR M5</strong>Mostre a zona e os candles recentes</div></div></div></section>
-<div class="actions" style="grid-column:1/-1"><button class="btn" id="go" disabled>ANALISAR H1 + M15 + M5</button><div class="status" id="status">• SISTEMA PRONTO</div></div>
+<section class="card m5" style="border-color:#FFD16688"><div class="head"><b>ATUALIZAR M5</b><span class="tag">OPCIONAL · NOVO PLANO</span></div><div class="body"><input id="m5update" type="file" accept="image/*" hidden><div class="drop" id="dm5update"><div class="placeholder"><strong>＋ NOVA FOTO DO M5</strong>Atualize após rompimento, pullback ou mudança de estrutura</div></div><div class="status">Use depois da análise principal. H1 e M15 ficam salvos como referência nesta página.</div></div></section>
+<div class="actions" style="grid-column:1/-1;display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap"><button class="btn" id="go" disabled>ANALISAR H1 + M15 + M5</button><button class="btn" id="update" disabled style="background:var(--yellow)">ATUALIZAR SOMENTE M5</button><div class="status" id="status" style="width:100%">• SISTEMA PRONTO</div></div>
 <section class="analysis"><div class="head"><b>ANÁLISE DA IA</b><span class="tag">GEMINI VISION</span></div><div id="out"><div class="loading">Adicione H1, M15 e M5 para montar o plano de entrada.</div></div></section>
 </div><div class="footer">O plano M5 é condicional: confirme os níveis no gráfico e não trate a análise como garantia de resultado.</div></div>
 <script>
-let files={h1:null,m15:null,m5:null};
+let files={h1:null,m15:null,m5:null,m5update:null};
+let analisePrincipal=null;
 function setup(id,key,drop){const input=document.getElementById(id), box=document.getElementById(drop);box.onclick=()=>input.click();input.onchange=()=>{files[key]=input.files[0];show(box,input.files[0]);check()}}
 function show(box,file){const r=new FileReader();r.onload=e=>box.innerHTML='<img src="'+e.target.result+'" alt="gráfico">';r.readAsDataURL(file)}
-function check(){document.getElementById('go').disabled=!(files.h1&&files.m15&&files.m5)}
-setup('h1','h1','dh1');setup('m15','m15','dm15');setup('m5','m5','dm5');
-document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 + M5 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, zona e plano de entrada M5...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);fd.append('m5',files.m5);try{const r=await fetch('/analisar',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro em vez de JSON. Tente novamente em alguns segundos.\n\nDetalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro na análise');render(d);status.textContent='• ANÁLISE CONCLUÍDA'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
+function check(){document.getElementById('go').disabled=!(files.h1&&files.m15&&files.m5);document.getElementById('update').disabled=!(analisePrincipal&&files.m5update)}
+setup('h1','h1','dh1');setup('m15','m15','dm15');setup('m5','m5','dm5');setup('m5update','m5update','dm5update');
+document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 + M5 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, zona e plano de entrada M5...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);fd.append('m5',files.m5);try{const r=await fetch('/analisar',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro em vez de JSON. Tente novamente em alguns segundos.\n\nDetalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro na análise');analisePrincipal=d;render(d);status.textContent='• ANÁLISE PRINCIPAL SALVA — M5 PODE SER ATUALIZADO'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
+document.getElementById('update').onclick=async()=>{
+ const btn=document.getElementById('update'),mainBtn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');
+ if(!analisePrincipal){status.textContent='Faça primeiro a análise principal H1 + M15 + M5.';return}
+ btn.disabled=true;mainBtn.disabled=true;status.textContent='Atualizando o plano com a nova imagem M5...';
+ const fd=new FormData();fd.append('m5_update',files.m5update);fd.append('analise_principal',JSON.stringify(analisePrincipal));
+ try{const r=await fetch('/atualizar_m5',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro. Tente novamente. Detalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro ao atualizar M5');analisePrincipal=d;render(d);status.textContent='• M5 ATUALIZADO — CONTEXTO H1/M15 PRESERVADO';files.m5update=null;document.getElementById('m5update').value='';document.getElementById('dm5update').innerHTML='<div class="placeholder"><strong>＋ NOVA FOTO DO M5</strong>Selecione outra captura para atualizar novamente</div>';check();
+ }catch(e){out.innerHTML+='<div class="err">Erro ao atualizar M5:\\n'+e.message+'</div>';status.textContent='• ERRO NA ATUALIZAÇÃO'}finally{btn.disabled=!(analisePrincipal&&files.m5update);mainBtn.disabled=!(files.h1&&files.m15&&files.m5)}
+};
 function render(d){
  const dir=(d.direcao_a_procurar||'AGUARDAR').toUpperCase();
  const cls=dir==='COMPRA'?'buy':dir==='VENDA'?'sell':'wait';
@@ -337,6 +409,23 @@ def analisar():
     try:
         result = gemini_analisar(h1.read(), h1.mimetype, m15.read(), m15.mimetype, m5.read(), m5.mimetype)
         return jsonify(result)
+    except Exception as e:
+        return jsonify(error=str(e)), 502
+
+@app.post('/atualizar_m5')
+def atualizar_m5():
+    imagem = request.files.get('m5_update')
+    analise_raw = request.form.get('analise_principal', '')
+    if not imagem:
+        return jsonify(error='Envie uma nova imagem M5.'), 400
+    try:
+        principal = json.loads(analise_raw)
+        if not isinstance(principal, dict) or not isinstance(principal.get('h1'), dict) or not isinstance(principal.get('m15'), dict):
+            return jsonify(error='A análise principal não está válida. Faça novamente H1 + M15 + M5.'), 400
+        result = gemini_atualizar_m5(principal, imagem.read(), imagem.mimetype)
+        return jsonify(result)
+    except json.JSONDecodeError:
+        return jsonify(error='Não foi possível ler a análise principal salva. Faça uma nova análise completa.'), 400
     except Exception as e:
         return jsonify(error=str(e)), 502
 
