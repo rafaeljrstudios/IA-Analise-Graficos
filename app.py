@@ -36,13 +36,25 @@ REGRAS FUNDAMENTAIS:
 10. Não confunda zona de interesse com gatilho de entrada.
 11. Não invente preços que não estejam visíveis. Se a escala não permitir
     precisão, use uma faixa aproximada e deixe isso claro.
-12. Não use R:R como se pudesse ser calculado com precisão apenas pelas imagens.
+12. Calcule o risco-retorno somente quando os preços numéricos estiverem claramente legíveis na escala.
+    Se não estiverem, preencha os campos numéricos com null e informe que não é possível calcular com segurança.
+    Nunca invente cotação para completar o cálculo.
 13. Analise a imagem M5 enviada, mas descreva somente evidências realmente visíveis.
 14. Uma foto é um recorte estático: não presuma candles anteriores/posteriores que não aparecem.
 15. Não declare entrada pronta se a rejeição, confirmação e gatilho não estiverem claramente visíveis.
 16. Se preços/escala não forem legíveis, não invente valores de zona, stop ou alvo; diga que não é possível estimar com precisão.
-17. Stop técnico deve ficar além do nível que invalida a hipótese, não em distância arbitrária.
-18. Avalie o espaço até o primeiro obstáculo; se o alvo estiver bloqueado ou o risco/retorno não compensar, descarte a entrada.
+17. STOP RECOMENDADO: deve ficar além de TODA a zona refinada, e não apenas abaixo/acima de um pavio interno.
+    - COMPRA: stop recomendado abaixo do limite inferior de toda a zona refinada, com margem de segurança
+      tecnicamente justificável pela estrutura visível. Informe a cotação exata.
+    - VENDA: stop recomendado acima do limite superior de toda a zona refinada, com margem de segurança
+      tecnicamente justificável pela estrutura visível. Informe a cotação exata.
+    - Informe também o stop técnico estrutural de referência. Não invente margem fixa se a escala não permitir.
+18. Identifique a cotação numérica do primeiro obstáculo relevante no sentido da operação.
+    Informe uma entrada planejada coerente com o gatilho M5 (não use o preço atual se o gatilho ainda não ocorreu).
+    O sistema calculará matematicamente risco, espaço até o obstáculo e R:R usando entrada planejada,
+    stop recomendado e obstáculo. Só aprove o filtro se R:R for >= 2.0.
+    Se algum preço não estiver claramente legível, não aprove por estimativa: marque cálculo indisponível.
+    Se R:R < 2.0, a decisão deve ser ENTRADA DESCARTADA.
 19. Não prometa taxa de acerto nem classifique a operação como garantida.
 
 LEITURA DO H1:
@@ -115,6 +127,16 @@ Use exatamente estas chaves:
     "stop_tecnico": "",
     "alvo_potencial": "",
     "invalidacao": "",
+    "zona_limite_inferior": null,
+    "zona_limite_superior": null,
+    "entrada_planejada": null,
+    "stop_recomendado": null,
+    "primeiro_obstaculo_preco": null,
+    "margem_stop_explicacao": "",
+    "risco_preco": null,
+    "espaco_obstaculo_preco": null,
+    "relacao_risco_retorno": null,
+    "filtro_2_1": "APROVADO | REPROVADO | INDISPONIVEL",
     "obstaculos_proximos": "",
     "decisao": "AGUARDAR | GATILHO IDENTIFICADO | ENTRADA DESCARTADA",
     "justificativa": ""
@@ -144,6 +166,67 @@ def retry_delay(response_headers, attempt):
     except Exception:
         pass
     return 2 + (attempt * 3)
+
+
+def calcular_filtro_rr(analise):
+    """Calcula R:R com preços numéricos fornecidos pelo modelo; não inventa níveis."""
+    m5 = analise.get('m5')
+    if not isinstance(m5, dict):
+        return analise
+
+    def numero(chave):
+        valor = m5.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            return None
+        return float(valor)
+
+    entrada = numero('entrada_planejada')
+    stop = numero('stop_recomendado')
+    obstaculo = numero('primeiro_obstaculo_preco')
+    inferior = numero('zona_limite_inferior')
+    superior = numero('zona_limite_superior')
+    direcao = str(analise.get('direcao_a_procurar', '')).upper()
+
+    m5['risco_preco'] = None
+    m5['espaco_obstaculo_preco'] = None
+    m5['relacao_risco_retorno'] = None
+    m5['filtro_2_1'] = 'INDISPONIVEL'
+
+    if None in (entrada, stop, obstaculo, inferior, superior) or inferior >= superior:
+        m5['filtro_2_1_motivo'] = 'Cotação da zona, entrada, stop ou primeiro obstáculo não está legível/confirmada.'
+        return analise
+
+    if direcao == 'COMPRA':
+        stop_valido = stop < inferior
+        obstaculo_valido = obstaculo > entrada
+        risco = entrada - stop
+        retorno = obstaculo - entrada
+    elif direcao == 'VENDA':
+        stop_valido = stop > superior
+        obstaculo_valido = obstaculo < entrada
+        risco = stop - entrada
+        retorno = entrada - obstaculo
+    else:
+        m5['filtro_2_1_motivo'] = 'Direção não definida como COMPRA ou VENDA.'
+        return analise
+
+    if not stop_valido or not obstaculo_valido or risco <= 0 or retorno <= 0:
+        m5['filtro_2_1_motivo'] = 'Níveis incompatíveis com a direção ou stop não está além de toda a zona.'
+        return analise
+
+    rr = retorno / risco
+    m5['risco_preco'] = round(risco, 8)
+    m5['espaco_obstaculo_preco'] = round(retorno, 8)
+    m5['relacao_risco_retorno'] = round(rr, 2)
+    m5['filtro_2_1'] = 'APROVADO' if rr >= 2.0 else 'REPROVADO'
+    m5['filtro_2_1_motivo'] = (
+        'Relação igual ou superior a 2:1 até o primeiro obstáculo.'
+        if rr >= 2.0 else
+        'Espaço até o primeiro obstáculo não oferece a relação mínima de 2:1.'
+    )
+    if rr < 2.0 and m5.get('decisao') == 'GATILHO IDENTIFICADO':
+        m5['decisao'] = 'ENTRADA DESCARTADA'
+    return analise
 
 
 def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
@@ -245,7 +328,7 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
                     result = json.loads(remover_virgulas_finais(text))
                 if not isinstance(result, dict):
                     raise ValueError('A resposta do Gemini não veio como objeto JSON.')
-                return result
+                return calcular_filtro_rr(result)
 
             except urllib.error.HTTPError as e:
                 detail = e.read().decode('utf-8', errors='replace')
@@ -285,8 +368,11 @@ M5_UPDATE_PROMPT = r'''Você é um analista técnico de Forex atualizando um pla
 Você receberá o JSON da análise principal H1/M15/M5 e uma NOVA imagem M5.
 Não refaça nem apague o contexto H1/M15 original. Use-o como referência, mas avalie a situação atual do preço com honestidade.
 Identifique se a zona antiga ainda vale, se houve rompimento, falso rompimento, pullback ou mudança da estrutura local. Não force a direção original se o preço a invalidou. Um movimento contrário no M5 pode ser correção, não declare reversão sem evidência.
-Procure novas zonas refinadas somente se visíveis. Informe gatilho, stop técnico além da invalidação, alvo potencial e obstáculos. Se não houver evidência suficiente, AGUARDAR. Não invente preços nem candles não mostrados. O plano é condicional, não garantia.
-Responda SOMENTE JSON válido com estas chaves: direcao_a_procurar, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, obstaculos_proximos, decisao, justificativa), resultado, confianca, resumo_atualizacao.
+Procure novas zonas refinadas somente se visíveis. Informe gatilho, stop técnico estrutural e STOP RECOMENDADO além de TODA a zona refinada com margem de segurança, alvo potencial e primeiro obstáculo.
+Para compra, stop recomendado abaixo do limite inferior da zona; para venda, acima do limite superior. Informe cotações numéricas apenas quando legíveis; caso contrário use null.
+Inclua zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco e margem_stop_explicacao.
+O servidor calculará R:R; não invente valores nem declare aprovação sem os preços. Se não houver evidência suficiente, AGUARDAR. O plano é condicional, não garantia.
+Responda SOMENTE JSON válido com estas chaves: direcao_a_procurar, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco, margem_stop_explicacao, obstaculos_proximos, decisao, justificativa), resultado, confianca, resumo_atualizacao.
 '''
 
 def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type):
@@ -328,6 +414,7 @@ def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type):
                     if key in upd:
                         merged[key] = upd[key]
                 merged['m5'] = upd['m5']
+                merged = calcular_filtro_rr(merged)
                 merged['resumo_atualizacao'] = upd.get('resumo_atualizacao', 'Plano M5 atualizado com a nova imagem.')
                 return merged
             except urllib.error.HTTPError as e:
@@ -390,7 +477,7 @@ function render(d){
  card('H1 — CONTEXTO',line('Contexto',d.h1?.contexto)+line('Estrutura',d.h1?.estrutura)+line('Fase',d.h1?.fase)+line('Níveis',d.h1?.principais_niveis))+
  card('M15 — ESTRUTURA / REGIÃO',line('Contexto',d.m15?.contexto)+line('Estrutura',d.m15?.estrutura)+line('Fase',d.m15?.fase)+line('Região',d.m15?.regiao_importante)+line('Relação com H1',d.m15?.relacao_com_h1))+
  card('POR QUE ESSA ZONA','<p>'+esc(d.por_que_essa_zona)+'</p>')+
- card('M5 — PLANO DE ENTRADA',line('Decisão',m.decisao)+line('Situação na zona',m.situacao_na_zona)+line('Rejeição',m.rejeicao)+line('Confirmação',m.confirmacao)+line('Gatilho',m.gatilho)+line('Zona refinada',m.zona_refinada)+line('Stop técnico',m.stop_tecnico)+line('Alvo potencial',m.alvo_potencial)+line('Invalidação',m.invalidacao)+line('Obstáculos próximos',m.obstaculos_proximos)+line('Justificativa',m.justificativa))+
+ card('M5 — PLANO DE ENTRADA',line('Decisão',m.decisao)+line('Situação na zona',m.situacao_na_zona)+line('Rejeição',m.rejeicao)+line('Confirmação',m.confirmacao)+line('Gatilho',m.gatilho)+line('Zona refinada',m.zona_refinada)+line('Stop técnico estrutural',m.stop_tecnico)+line('Stop recomendado (cotação exata)',m.stop_recomendado)+line('Margem do stop',m.margem_stop_explicacao)+line('Entrada planejada',m.entrada_planejada)+line('Primeiro obstáculo (cotação)',m.primeiro_obstaculo_preco)+line('Limites da zona',String(m.zona_limite_inferior??'—')+' até '+String(m.zona_limite_superior??'—'))+line('Risco em preço',m.risco_preco)+line('Espaço até obstáculo',m.espaco_obstaculo_preco)+line('Relação risco-retorno',m.relacao_risco_retorno)+line('Filtro mínimo 2:1',m.filtro_2_1)+line('Motivo do filtro',m.filtro_2_1_motivo)+line('Alvo potencial',m.alvo_potencial)+line('Invalidação',m.invalidacao)+line('Obstáculos próximos',m.obstaculos_proximos)+line('Justificativa',m.justificativa))+
  card('RESULTADO E CONFIANÇA',line('Resumo',d.resultado)+line('Confiança visual',d.confianca))+'</div></div>';
 }
 </script></body></html>'''
