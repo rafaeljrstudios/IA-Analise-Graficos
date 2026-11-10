@@ -16,7 +16,8 @@ seguindo exatamente esta metodologia:
 SEQUÊNCIA:
 H1 → contexto e direção
 M15 → estrutura + região + confirmação do contexto
-M5 → análise visual da rejeição, confirmação, gatilho, invalidação, stop técnico e alvo.
+M5 → valida reação, rejeição e confirmação.
+M1 → procura o gatilho preciso de entrada, SEM definir direção sozinho.
 
 REGRAS FUNDAMENTAIS:
 1. H1 define o contexto principal.
@@ -41,6 +42,9 @@ REGRAS FUNDAMENTAIS:
     Nunca invente cotação para completar o cálculo.
 13. Analise a imagem M5 enviada, mas descreva somente evidências realmente visíveis.
 14. Uma foto é um recorte estático: não presuma candles anteriores/posteriores que não aparecem.
+15. O M1 só pode procurar entrada depois que o M5 mostrar reação válida na zona. Se M5 não validar, M1 fica BLOQUEADO.
+16. M1 não pode contrariar sozinho a direção definida por H1/M15.
+17. Se o movimento já tiver percorrido muito espaço ou o R:R for inferior a 2:1, não persiga o preço; marque AGUARDAR ou ENTRADA DESCARTADA.
 15. Não declare entrada pronta se a rejeição, confirmação e gatilho não estiverem claramente visíveis.
 16. Se preços/escala não forem legíveis, não invente valores de zona, stop ou alvo; diga que não é possível estimar com precisão.
 17. STOP RECOMENDADO: deve ficar além de TODA a zona refinada, e não apenas abaixo/acima de um pavio interno.
@@ -141,19 +145,26 @@ Use exatamente estas chaves:
     "decisao": "AGUARDAR | GATILHO IDENTIFICADO | ENTRADA DESCARTADA",
     "justificativa": ""
   },
+  "m1": {
+    "estado": "BLOQUEADO | AGUARDAR | GATILHO IDENTIFICADO | OPORTUNIDADE PERDIDA",
+    "estrutura_curta": "",
+    "gatilho": "",
+    "entrada_precisa": null,
+    "stop_referencia": null,
+    "justificativa": ""
+  },
   "resultado": "",
   "confianca": "BAIXA | MÉDIA | ALTA"
 }
 '''
 
 MODELS = [
-    # Ordem pensada para priorizar disponibilidade e manter boa qualidade multimodal.
-    ('gemini-3.7-flash', 2),
-    ('gemini-3.8-flash', 2),
-    ('gemini-3.5-flash-lite', 1),
+    # Uma chamada principal e apenas uma alternativa, para evitar longas filas de tentativas.
+    ('gemini-3.7-flash', 1),
+    ('gemini-3.8-flash', 1),
 ]
 
-REQUEST_TIMEOUT = 60
+REQUEST_TIMEOUT = 45
 
 
 def retry_delay(response_headers, attempt):
@@ -229,7 +240,7 @@ def calcular_filtro_rr(analise):
     return analise
 
 
-def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
+def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type, m1_bytes, m1_type):
     chave = os.getenv('GEMINI_API_KEY', '').strip()
     if not chave:
         raise RuntimeError('GEMINI_API_KEY não configurada no servidor.')
@@ -249,8 +260,10 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
                 part(h1_bytes, h1_type),
                 {'text': '\n\nIMAGEM M15:'},
                 part(m15_bytes, m15_type),
-                {'text': '\n\nIMAGEM M5 — analise rejeição, confirmação e gatilho com base somente nesta imagem:'},
+                {'text': '\n\nIMAGEM M5 — valide a reação, rejeição e confirmação:'},
                 part(m5_bytes, m5_type),
+                {'text': '\n\nIMAGEM M1 — procure o gatilho preciso somente se M5 validar a reação:'},
+                part(m1_bytes, m1_type),
             ]
         }],
         'generationConfig': {
@@ -276,8 +289,10 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
                 method='POST'
             )
             try:
+                inicio_chamada = time.perf_counter()
                 with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
                     body = response.read().decode('utf-8')
+                print(f'[GEMINI] {model} respondeu em {time.perf_counter()-inicio_chamada:.1f}s', flush=True)
                 obj = json.loads(body)
                 text = obj['candidates'][0]['content']['parts'][0]['text'].strip()
                 if text.startswith('```'):
@@ -364,26 +379,29 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type):
     )
 
 
-M5_UPDATE_PROMPT = r'''Você é um analista técnico de Forex atualizando um plano já existente usando uma nova captura do M5.
-Você receberá o JSON da análise principal H1/M15/M5 e uma NOVA imagem M5.
+M5_UPDATE_PROMPT = r'''Você é um analista técnico de Forex atualizando um plano já existente usando novas capturas M5 e M1.
+Você receberá o JSON da análise principal H1/M15/M5/M1 e NOVAS imagens M5 e M1.
 Não refaça nem apague o contexto H1/M15 original. Use-o como referência, mas avalie a situação atual do preço com honestidade.
 Identifique se a zona antiga ainda vale, se houve rompimento, falso rompimento, pullback ou mudança da estrutura local. Não force a direção original se o preço a invalidou. Um movimento contrário no M5 pode ser correção, não declare reversão sem evidência.
 Procure novas zonas refinadas somente se visíveis. Informe gatilho, stop técnico estrutural e STOP RECOMENDADO além de TODA a zona refinada com margem de segurança, alvo potencial e primeiro obstáculo.
 Para compra, stop recomendado abaixo do limite inferior da zona; para venda, acima do limite superior. Informe cotações numéricas apenas quando legíveis; caso contrário use null.
 Inclua zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco e margem_stop_explicacao.
-O servidor calculará R:R; não invente valores nem declare aprovação sem os preços. Se não houver evidência suficiente, AGUARDAR. O plano é condicional, não garantia.
-Responda SOMENTE JSON válido com estas chaves: direcao_a_procurar, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco, margem_stop_explicacao, obstaculos_proximos, decisao, justificativa), resultado, confianca, resumo_atualizacao.
+O M5 valida reação e estrutura; o M1 apenas procura o gatilho preciso depois da validação M5. Se M5 não validar, M1 deve ficar BLOQUEADO. Não use M1 para contrariar H1/M15. O servidor calculará R:R; não invente valores nem declare aprovação sem os preços. Se não houver evidência suficiente, AGUARDAR. O plano é condicional, não garantia.
+Responda SOMENTE JSON válido com estas chaves: direcao_a_procurar, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco, margem_stop_explicacao, obstaculos_proximos, decisao, justificativa), m1 (com estado, estrutura_curta, gatilho, entrada_precisa, stop_referencia, justificativa), resultado, confianca, resumo_atualizacao.
 '''
 
-def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type):
+def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type, m1_bytes, m1_type):
     chave = os.getenv('GEMINI_API_KEY', '').strip()
     if not chave:
         raise RuntimeError('GEMINI_API_KEY não configurada no servidor.')
     parte = {'inline_data': {'mime_type': m5_type or 'image/png', 'data': base64.b64encode(m5_bytes).decode('ascii')}}
+    parte_m1 = {'inline_data': {'mime_type': m1_type or 'image/png', 'data': base64.b64encode(m1_bytes).decode('ascii')}}
     payload = {
         'contents': [{'parts': [
-            {'text': M5_UPDATE_PROMPT + '\n\nANÁLISE PRINCIPAL SALVA (JSON):\n' + json.dumps(analise_principal, ensure_ascii=False) + '\n\nNOVA IMAGEM M5 — use esta imagem como estado atual do preço:'},
-            parte
+            {'text': M5_UPDATE_PROMPT + '\n\nANÁLISE PRINCIPAL SALVA (JSON):\n' + json.dumps(analise_principal, ensure_ascii=False) + '\n\nNOVA IMAGEM M5 — valide a reação atual:'},
+            parte,
+            {'text': '\n\nNOVA IMAGEM M1 — procure gatilho preciso somente se M5 validar:'},
+            parte_m1
         ]}],
         'generationConfig': {'temperature': 0.15, 'responseMimeType': 'application/json'}
     }
@@ -394,8 +412,10 @@ def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type):
         for attempt in range(retries):
             req = urllib.request.Request(url, data=raw, headers={'Content-Type':'application/json','x-goog-api-key':chave,'User-Agent':'IA-Analise-Graficos/1.0'}, method='POST')
             try:
+                inicio_chamada = time.perf_counter()
                 with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
                     obj = json.loads(response.read().decode('utf-8'))
+                print(f'[GEMINI UPDATE] {model} respondeu em {time.perf_counter()-inicio_chamada:.1f}s', flush=True)
                 txt = obj['candidates'][0]['content']['parts'][0]['text'].strip()
                 if txt.startswith('```'):
                     txt = txt.replace('```json','',1).replace('```','',1).strip()
@@ -414,8 +434,10 @@ def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type):
                     if key in upd:
                         merged[key] = upd[key]
                 merged['m5'] = upd['m5']
+                if isinstance(upd.get('m1'), dict):
+                    merged['m1'] = upd['m1']
                 merged = calcular_filtro_rr(merged)
-                merged['resumo_atualizacao'] = upd.get('resumo_atualizacao', 'Plano M5 atualizado com a nova imagem.')
+                merged['resumo_atualizacao'] = upd.get('resumo_atualizacao', 'Plano M5/M1 atualizado com as novas imagens.')
                 return merged
             except urllib.error.HTTPError as e:
                 last_error = f'{model} HTTP {e.code}: {e.read().decode("utf-8", errors="replace")[:500]}'
@@ -441,30 +463,31 @@ HTML = r'''<!doctype html>
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0%,#0b1930 0,#050B16 40%,#030711 100%);color:var(--text);font-family:Segoe UI,Arial,sans-serif;min-height:100vh}.wrap{max-width:1450px;margin:auto;padding:28px}.header{text-align:center;margin-bottom:24px}.title{font-size:38px;font-weight:800;letter-spacing:1px}.sub{color:var(--cyan);font-weight:600;margin-top:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:linear-gradient(180deg,#091525,#06101d);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 0 30px #0008}.card.h1{border-color:#00d9ff88}.card.m15{border-color:#ff3dde88}.card.m5{border-color:#00f59b88}.head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}.head b{font-size:18px}.tag{font-size:12px;color:var(--muted)}.body{padding:18px}.drop{height:310px;border:1px dashed #31506f;border-radius:12px;background:#06101c;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}.drop:hover{border-color:var(--cyan);box-shadow:inset 0 0 30px #00d9ff10}.drop img{max-width:100%;max-height:100%;object-fit:contain}.placeholder{text-align:center;color:var(--muted)}.placeholder strong{display:block;color:var(--text);font-size:17px;margin-bottom:6px}.actions{text-align:center;margin:20px 0}.btn{border:0;border-radius:10px;padding:13px 20px;font-weight:800;cursor:pointer;background:var(--green);color:#03100c;box-shadow:0 0 24px #00f59b22}.btn:disabled{opacity:.5;cursor:not-allowed}.status{color:var(--muted);font-size:13px;margin-top:10px}.analysis{grid-column:1/-1;border:1px solid var(--purple);background:linear-gradient(180deg,#091525,#060d19);border-radius:16px;box-shadow:0 0 30px #a855f722}.analysis .head{border-color:#a855f744}.result{padding:18px;display:none}.hero{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.metric{padding:15px;border:1px solid var(--border);border-radius:12px;background:#07111f}.metric span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase}.metric strong{display:block;font-size:22px;margin-top:6px}.buy{color:var(--green)}.sell{color:var(--red)}.wait{color:var(--yellow)}.sections{display:grid;grid-template-columns:1fr 1fr;gap:12px}.box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:15px}.box h3{margin:0 0 10px;color:var(--cyan);font-size:14px}.box p{margin:7px 0;color:#d9e5f5;line-height:1.45}.footer{text-align:center;color:var(--green);font-size:12px;margin-top:18px}.err{color:#ff8fa3;padding:18px;white-space:pre-wrap}.loading{color:var(--cyan);padding:18px;text-align:center}@media(max-width:900px){.grid,.sections{grid-template-columns:1fr}.hero{grid-template-columns:1fr}.title{font-size:28px}.wrap{padding:14px}}
 </style></head>
 <body><div class="wrap">
-<header class="header"><div class="title">IA DE ANÁLISE MULTI-TIMEFRAME</div><div class="sub">H1 → DIREÇÃO / CONTEXTO &nbsp; | &nbsp; M15 → REGIÃO / ESTRUTURA &nbsp; | &nbsp; M5 → REJEIÇÃO / CONFIRMAÇÃO / GATILHO</div></header>
+<header class="header"><div class="title">IA DE ANÁLISE MULTI-TIMEFRAME</div><div class="sub">H1 → DIREÇÃO &nbsp; | &nbsp; M15 → REGIÃO &nbsp; | &nbsp; M5 → VALIDAÇÃO &nbsp; | &nbsp; M1 → GATILHO</div></header>
 <div class="grid">
 <section class="card h1"><div class="head"><b>H1</b><span class="tag">DIREÇÃO / CONTEXTO</span></div><div class="body"><input id="h1" type="file" accept="image/*" hidden><div class="drop" id="dh1"><div class="placeholder"><strong>＋ ADICIONAR H1</strong>Clique aqui para selecionar o gráfico</div></div></div></section>
 <section class="card m15"><div class="head"><b>M15</b><span class="tag">REGIÃO / ESTRUTURA</span></div><div class="body"><input id="m15" type="file" accept="image/*" hidden><div class="drop" id="dm15"><div class="placeholder"><strong>＋ ADICIONAR M15</strong>Clique aqui para selecionar o gráfico</div></div></div></section>
 <section class="card m5"><div class="head"><b>M5</b><span class="tag">REJEIÇÃO / CONFIRMAÇÃO / GATILHO</span></div><div class="body"><input id="m5" type="file" accept="image/*" hidden><div class="drop" id="dm5"><div class="placeholder"><strong>＋ ADICIONAR M5</strong>Mostre a zona e os candles recentes</div></div></div></section>
-<section class="card m5" style="border-color:#FFD16688"><div class="head"><b>ATUALIZAR M5</b><span class="tag">OPCIONAL · NOVO PLANO</span></div><div class="body"><input id="m5update" type="file" accept="image/*" hidden><div class="drop" id="dm5update"><div class="placeholder"><strong>＋ NOVA FOTO DO M5</strong>Atualize após rompimento, pullback ou mudança de estrutura</div></div><div class="status">Use depois da análise principal. H1 e M15 ficam salvos como referência nesta página.</div></div></section>
-<div class="actions" style="grid-column:1/-1;display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap"><button class="btn" id="go" disabled>ANALISAR H1 + M15 + M5</button><button class="btn" id="update" disabled style="background:var(--yellow)">ATUALIZAR SOMENTE M5</button><div class="status" id="status" style="width:100%">• SISTEMA PRONTO</div></div>
-<section class="analysis"><div class="head"><b>ANÁLISE DA IA</b><span class="tag">GEMINI VISION</span></div><div id="out"><div class="loading">Adicione H1, M15 e M5 para montar o plano de entrada.</div></div></section>
+<section class="card m5" style="border-color:#A855F7"><div class="head"><b>M1</b><span class="tag">GATILHO PRECISO DE ENTRADA</span></div><div class="body"><input id="m1" type="file" accept="image/*" hidden><div class="drop" id="dm1"><div class="placeholder"><strong>＋ ADICIONAR M1</strong>Mostre os candles recentes para buscar o gatilho</div></div></div></section>
+<section class="card m5" style="border-color:#FFD16688"><div class="head"><b>ATUALIZAR M5 + M1</b><span class="tag">ATUALIZAÇÃO RÁPIDA</span></div><div class="body"><input id="m5update" type="file" accept="image/*" hidden><div class="drop" id="dm5update"><div class="placeholder"><strong>＋ NOVA FOTO DO M5</strong>Atualize a reação na região</div></div><input id="m1update" type="file" accept="image/*" hidden><div class="drop" id="dm1update" style="margin-top:12px"><div class="placeholder"><strong>＋ NOVA FOTO DO M1</strong>Atualize o gatilho de entrada</div></div><div class="status">Envie as duas imagens. H1/M15 ficam salvos e não são reenviados.</div></div></section>
+<div class="actions" style="grid-column:1/-1;display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap"><button class="btn" id="go" disabled>ANALISAR H1 + M15 + M5 + M1</button><button class="btn" id="update" disabled style="background:var(--yellow)">ATUALIZAR M5 + M1</button><div class="status" id="status" style="width:100%">• SISTEMA PRONTO</div></div>
+<section class="analysis"><div class="head"><b>ANÁLISE DA IA</b><span class="tag">GEMINI VISION</span></div><div id="out"><div class="loading">Adicione H1, M15, M5 e M1 para montar o plano de entrada.</div></div></section>
 </div><div class="footer">O plano M5 é condicional: confirme os níveis no gráfico e não trate a análise como garantia de resultado.</div></div>
 <script>
-let files={h1:null,m15:null,m5:null,m5update:null};
+let files={h1:null,m15:null,m5:null,m1:null,m5update:null,m1update:null};
 let analisePrincipal=null;
 function setup(id,key,drop){const input=document.getElementById(id), box=document.getElementById(drop);box.onclick=()=>input.click();input.onchange=()=>{files[key]=input.files[0];show(box,input.files[0]);check()}}
 function show(box,file){const r=new FileReader();r.onload=e=>box.innerHTML='<img src="'+e.target.result+'" alt="gráfico">';r.readAsDataURL(file)}
-function check(){document.getElementById('go').disabled=!(files.h1&&files.m15&&files.m5);document.getElementById('update').disabled=!(analisePrincipal&&files.m5update)}
-setup('h1','h1','dh1');setup('m15','m15','dm15');setup('m5','m5','dm5');setup('m5update','m5update','dm5update');
-document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 + M5 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, zona e plano de entrada M5...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);fd.append('m5',files.m5);try{const r=await fetch('/analisar',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro em vez de JSON. Tente novamente em alguns segundos.\n\nDetalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro na análise');analisePrincipal=d;render(d);status.textContent='• ANÁLISE PRINCIPAL SALVA — M5 PODE SER ATUALIZADO'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
+function check(){document.getElementById('go').disabled=!(files.h1&&files.m15&&files.m5&&files.m1);document.getElementById('update').disabled=!(analisePrincipal&&files.m5update&&files.m1update)}
+setup('h1','h1','dh1');setup('m15','m15','dm15');setup('m5','m5','dm5');setup('m1','m1','dm1');setup('m5update','m5update','dm5update');setup('m1update','m1update','dm1update');
+document.getElementById('go').onclick=async()=>{const btn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');btn.disabled=true;status.textContent='Enviando H1 + M15 + M5 + M1 para o Gemini...';out.innerHTML='<div class="loading">Analisando contexto, validação M5 e gatilho M1...</div>';const fd=new FormData();fd.append('h1',files.h1);fd.append('m15',files.m15);fd.append('m5',files.m5);fd.append('m1',files.m1);try{const r=await fetch('/analisar',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro em vez de JSON. Tente novamente em alguns segundos.\n\nDetalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro na análise');analisePrincipal=d;render(d);status.textContent='• ANÁLISE PRINCIPAL SALVA — M5 + M1 PODEM SER ATUALIZADOS'}catch(e){out.innerHTML='<div class="err">Erro na análise Gemini:\n'+e.message+'</div>';status.textContent='• ERRO NA ANÁLISE'}finally{btn.disabled=false;check()}};
 document.getElementById('update').onclick=async()=>{
  const btn=document.getElementById('update'),mainBtn=document.getElementById('go'),status=document.getElementById('status'),out=document.getElementById('out');
- if(!analisePrincipal){status.textContent='Faça primeiro a análise principal H1 + M15 + M5.';return}
- btn.disabled=true;mainBtn.disabled=true;status.textContent='Atualizando o plano com a nova imagem M5...';
- const fd=new FormData();fd.append('m5_update',files.m5update);fd.append('analise_principal',JSON.stringify(analisePrincipal));
- try{const r=await fetch('/atualizar_m5',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro. Tente novamente. Detalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro ao atualizar M5');analisePrincipal=d;render(d);status.textContent='• M5 ATUALIZADO — CONTEXTO H1/M15 PRESERVADO';files.m5update=null;document.getElementById('m5update').value='';document.getElementById('dm5update').innerHTML='<div class="placeholder"><strong>＋ NOVA FOTO DO M5</strong>Selecione outra captura para atualizar novamente</div>';check();
- }catch(e){out.innerHTML+='<div class="err">Erro ao atualizar M5:\\n'+e.message+'</div>';status.textContent='• ERRO NA ATUALIZAÇÃO'}finally{btn.disabled=!(analisePrincipal&&files.m5update);mainBtn.disabled=!(files.h1&&files.m15&&files.m5)}
+ if(!analisePrincipal){status.textContent='Faça primeiro a análise principal H1 + M15 + M5 + M1.';return}
+ btn.disabled=true;mainBtn.disabled=true;status.textContent='Atualizando o plano com as novas imagens M5 + M1...';
+ const fd=new FormData();fd.append('m5_update',files.m5update);fd.append('m1_update',files.m1update);fd.append('analise_principal',JSON.stringify(analisePrincipal));
+ try{const r=await fetch('/atualizar_m5',{method:'POST',body:fd});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch(_){throw new Error('O servidor retornou uma página de erro. Tente novamente. Detalhe: '+raw.slice(0,180))}if(!r.ok)throw new Error(d.error||'Erro ao atualizar M5');analisePrincipal=d;render(d);status.textContent='• M5 + M1 ATUALIZADOS — CONTEXTO H1/M15 PRESERVADO';files.m5update=null;files.m1update=null;document.getElementById('m5update').value='';document.getElementById('m1update').value='';document.getElementById('dm5update').innerHTML='<div class="placeholder"><strong>＋ NOVA FOTO DO M5</strong>Selecione outra captura</div>';document.getElementById('dm1update').innerHTML='<div class="placeholder"><strong>＋ NOVA FOTO DO M1</strong>Selecione outra captura</div>';check();
+ }catch(e){out.innerHTML+='<div class="err">Erro ao atualizar M5:\\n'+e.message+'</div>';status.textContent='• ERRO NA ATUALIZAÇÃO'}finally{btn.disabled=!(analisePrincipal&&files.m5update&&files.m1update);mainBtn.disabled=!(files.h1&&files.m15&&files.m5&&files.m1)}
 };
 function render(d){
  const dir=(d.direcao_a_procurar||'AGUARDAR').toUpperCase();
@@ -478,7 +501,8 @@ function render(d){
  card('M15 — ESTRUTURA / REGIÃO',line('Contexto',d.m15?.contexto)+line('Estrutura',d.m15?.estrutura)+line('Fase',d.m15?.fase)+line('Região',d.m15?.regiao_importante)+line('Relação com H1',d.m15?.relacao_com_h1))+
  card('POR QUE ESSA ZONA','<p>'+esc(d.por_que_essa_zona)+'</p>')+
  card('M5 — PLANO DE ENTRADA',line('Decisão',m.decisao)+line('Situação na zona',m.situacao_na_zona)+line('Rejeição',m.rejeicao)+line('Confirmação',m.confirmacao)+line('Gatilho',m.gatilho)+line('Zona refinada',m.zona_refinada)+line('Stop técnico estrutural',m.stop_tecnico)+line('Stop recomendado (cotação exata)',m.stop_recomendado)+line('Margem do stop',m.margem_stop_explicacao)+line('Entrada planejada',m.entrada_planejada)+line('Primeiro obstáculo (cotação)',m.primeiro_obstaculo_preco)+line('Limites da zona',String(m.zona_limite_inferior??'—')+' até '+String(m.zona_limite_superior??'—'))+line('Risco em preço',m.risco_preco)+line('Espaço até obstáculo',m.espaco_obstaculo_preco)+line('Relação risco-retorno',m.relacao_risco_retorno)+line('Filtro mínimo 2:1',m.filtro_2_1)+line('Motivo do filtro',m.filtro_2_1_motivo)+line('Alvo potencial',m.alvo_potencial)+line('Invalidação',m.invalidacao)+line('Obstáculos próximos',m.obstaculos_proximos)+line('Justificativa',m.justificativa))+
- card('RESULTADO E CONFIANÇA',line('Resumo',d.resultado)+line('Confiança visual',d.confianca))+'</div></div>';
+ card('M1 — GATILHO DE ENTRADA',line('Estado',d.m1?.estado)+line('Estrutura curta',d.m1?.estrutura_curta)+line('Gatilho',d.m1?.gatilho)+line('Entrada precisa',d.m1?.entrada_precisa)+line('Stop de referência',d.m1?.stop_referencia)+line('Justificativa',d.m1?.justificativa))+
+  card('RESULTADO E CONFIANÇA',line('Resumo',d.resultado)+line('Confiança visual',d.confianca))+'</div></div>';
 }
 </script></body></html>'''
 
@@ -491,10 +515,11 @@ def analisar():
     h1 = request.files.get('h1')
     m15 = request.files.get('m15')
     m5 = request.files.get('m5')
-    if not h1 or not m15 or not m5:
-        return jsonify(error='Envie as três imagens: H1, M15 e M5.'), 400
+    m1 = request.files.get('m1')
+    if not h1 or not m15 or not m5 or not m1:
+        return jsonify(error='Envie as quatro imagens: H1, M15, M5 e M1.'), 400
     try:
-        result = gemini_analisar(h1.read(), h1.mimetype, m15.read(), m15.mimetype, m5.read(), m5.mimetype)
+        result = gemini_analisar(h1.read(), h1.mimetype, m15.read(), m15.mimetype, m5.read(), m5.mimetype, m1.read(), m1.mimetype)
         return jsonify(result)
     except Exception as e:
         return jsonify(error=str(e)), 502
@@ -502,14 +527,15 @@ def analisar():
 @app.post('/atualizar_m5')
 def atualizar_m5():
     imagem = request.files.get('m5_update')
+    imagem_m1 = request.files.get('m1_update')
     analise_raw = request.form.get('analise_principal', '')
-    if not imagem:
-        return jsonify(error='Envie uma nova imagem M5.'), 400
+    if not imagem or not imagem_m1:
+        return jsonify(error='Envie as duas imagens novas: M5 e M1.'), 400
     try:
         principal = json.loads(analise_raw)
         if not isinstance(principal, dict) or not isinstance(principal.get('h1'), dict) or not isinstance(principal.get('m15'), dict):
             return jsonify(error='A análise principal não está válida. Faça novamente H1 + M15 + M5.'), 400
-        result = gemini_atualizar_m5(principal, imagem.read(), imagem.mimetype)
+        result = gemini_atualizar_m5(principal, imagem.read(), imagem.mimetype, imagem_m1.read(), imagem_m1.mimetype)
         return jsonify(result)
     except json.JSONDecodeError:
         return jsonify(error='Não foi possível ler a análise principal salva. Faça uma nova análise completa.'), 400
