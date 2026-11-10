@@ -100,11 +100,27 @@ ANÁLISE M5 (A IMAGEM M5 ESTÁ DISPONÍVEL):
 - Para COMPRA: procure rejeição compradora, candle de confirmação e rompimento da máxima da confirmação.
 - Para VENDA: procure rejeição vendedora, candle de confirmação e rompimento da mínima da confirmação.
 - Distinga rejeição, confirmação e gatilho; não trate pavio isolado como gatilho suficiente.
+- Gere um plano condicional: identifique a vela de rejeição e a vela de confirmação (se existir), o preço de gatilho (máxima da confirmação para compra / mínima para venda, ou pivô melhor justificado), a condição exata de rompimento/fechamento, eventual reteste e nível/preço de cancelamento do cenário.
+- A confirmação pode levar mais de uma vela; não exija uma quantidade fixa. Explique o que observar em cada nova vela e quando a zona deixa de valer.
+- Se o preço de cancelamento for perdido antes do gatilho, marque CANCELADO. Se os preços não forem legíveis, use null e descreva o nível visual sem inventar cotação.
 - Procure falso rompimento/varredura de liquidez, estrutura local, e suporte/resistência próximo contra a operação.
 - Dê uma zona refinada somente se os preços estiverem legíveis; ela deve ser uma faixa, não falsa precisão.
 - Informe stop técnico/invalidação e alvo potencial apenas quando níveis visíveis sustentarem a estimativa.
 - Se faltar evidência, responda AGUARDAR e diga o que precisa acontecer.
 - A decisão é um plano condicional, não uma garantia de resultado.
+
+PLANO CONDICIONAL DE CONFIRMAÇÃO, GATILHO E CANCELAMENTO (OBRIGATÓRIO):
+- Não responda apenas BLOQUEADO quando houver uma zona válida. Descreva o próximo evento observável que pode formar uma entrada.
+- Separe claramente REJEIÇÃO, CONFIRMAÇÃO M5, NÍVEL DE GATILHO, EXECUÇÃO M1 e INVALIDAÇÃO/CANCELAMENTO.
+- Após rejeição, a confirmação pode levar várias velas. NÃO imponha quantidade fixa de candles: avalie máximas, mínimas, fechamentos, sequência, perda de força e se a zona continua válida. Diga quantas velas são visíveis/decorreram apenas quando puder contar na imagem.
+- Quando a rejeição estiver visível, identifique a máxima da vela de rejeição (compra) ou mínima (venda), e avalie se ela é um nível de gatilho adequado. Se uma vela posterior formar confirmação mais relevante, use a máxima/mínima dessa vela. Informe o preço numérico do gatilho somente se a escala permitir leitura confiável; caso contrário, descreva o nível visual e peça novo print com escala legível.
+- Gatilho de COMPRA: condição objetiva, normalmente rompimento e FECHAMENTO M5 acima da máxima de confirmação ou outro pivô local validado. Gatilho de VENDA: fechamento M5 abaixo da mínima de confirmação ou pivô local validado. Não confunda pavio que atravessa o nível com rompimento confirmado. Explique se o gatilho exige fechamento M5 ou se o M1 pode antecipar apenas após autorização M5.
+- Informe se vale aguardar reteste do nível rompido; não exija reteste sempre. Se houver reteste, descreva o que precisa segurar/rejeitar e qual seria o gatilho M1.
+- DEFINA UM NÍVEL DE CANCELAMENTO: COMPRA é cancelada se perder o fundo estrutural que sustenta a rejeição/zona; VENDA é cancelada se superar o topo estrutural que sustenta a rejeição/zona. Informe preço numérico somente se legível e especifique se basta pavio ou se exige FECHAMENTO M5 além do nível. Prefira fechamento/estrutura para evitar cancelar por ruído, salvo rompimento claro da zona.
+- Se o nível de cancelamento for atingido antes do gatilho, marque cenário CANCELADO e não mantenha a antiga compra/venda como válida. Se o gatilho acontecer depois do cancelamento, não reutilize o plano antigo: reanalise.
+- Se o preço disparar e a entrada planejada ficar para trás, marque oportunidade perdida/aguardar; nunca persiga.
+- Antes de dizer entrada válida, calcule R:R com entrada executável, stop estrutural e primeiro obstáculo real. Exigir >= 2:1. Se não houver espaço, diga claramente SEM ENTRADA: R:R abaixo de 2:1, e explique o que poderia melhorar (recuo/entrada melhor ou novo obstáculo/alvo tecnicamente justificável), sem inventar alvo.
+- Os campos de gatilho e cancelamento são planos condicionais, não ordens automáticas nem previsão garantida.
 
 FORMATO OBRIGATÓRIO:
 Responda SOMENTE com JSON válido, sem markdown, sem ``` e sem texto antes/depois.
@@ -134,7 +150,16 @@ Use exatamente estas chaves:
     "situacao_na_zona": "",
     "rejeicao": "",
     "confirmacao": "",
+    "vela_confirmacao_referencia": "",
     "gatilho": "",
+    "preco_gatilho": null,
+    "condicao_gatilho": "",
+    "reteste_necessario": "",
+    "condicao_reteste": "",
+    "preco_cancelamento": null,
+    "condicao_cancelamento": "",
+    "status_cenario": "EM FORMACAO | AGUARDANDO GATILHO | GATILHO CONFIRMADO | CANCELADO | OPORTUNIDADE PERDIDA",
+    "proximo_passo": "",
     "zona_refinada": "",
     "stop_tecnico": "",
     "alvo_potencial": "",
@@ -403,11 +428,12 @@ IMPORTANTE: atualize explicitamente o viés operacional. Separe VIÉS de AUTORIZ
 - gatilho_m1 = IDENTIFICADO somente se M5 estiver autorizado e M1 apresentar gatilho objetivo; caso contrário AGUARDAR/BLOQUEADO.
 - Nunca transforme viés vendedor em ordem de venda imediata; após movimento esticado, exija reteste e novo gatilho.
 Identifique se a zona antiga ainda vale, se houve rompimento, falso rompimento, pullback ou mudança da estrutura local. Não force a direção original se o preço a invalidou. Um movimento contrário no M5 pode ser correção, não declare reversão sem evidência.
+PLANO CONDICIONAL: não fique apenas em BLOQUEADO. Informe a vela de rejeição, a vela de confirmação (se existir), preço e condição objetiva do gatilho, se exige fechamento M5, se vale esperar reteste e o gatilho M1 após autorização M5. A confirmação pode levar várias velas; não imponha contagem fixa. Identifique também preço de cancelamento estrutural e diga se o cancelamento exige fechamento M5 ou se um rompimento claro por pavio já invalida a zona. Se perder o nível de cancelamento antes do gatilho, marque CANCELADO. Se o preço já disparou, marque OPORTUNIDADE PERDIDA/AGUARDAR, sem perseguir. Cotação numérica somente quando legível; caso contrário null. R:R menor que 2:1 ou indisponível significa sem entrada liberada.
 Procure novas zonas refinadas somente se visíveis. Informe gatilho, stop técnico estrutural e STOP RECOMENDADO além de TODA a zona refinada com margem de segurança, alvo potencial e primeiro obstáculo.
 Para compra, stop recomendado abaixo do limite inferior da zona; para venda, acima do limite superior. Informe cotações numéricas apenas quando legíveis; caso contrário use null.
 Inclua zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco e margem_stop_explicacao.
 O M5 valida reação e estrutura; o M1 apenas procura o gatilho preciso depois da validação M5. Se M5 não validar, M1 deve ficar BLOQUEADO. Não use M1 para contrariar H1/M15. O servidor calculará R:R; não invente valores nem declare aprovação sem os preços. Se não houver evidência suficiente, AGUARDAR. O plano é condicional, não garantia.
-Responda SOMENTE JSON válido com estas chaves: vies_operacional, direcao_a_procurar, autorizacao_m5, gatilho_m1, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco, margem_stop_explicacao, obstaculos_proximos, decisao, justificativa), m1 (com estado, estrutura_curta, gatilho, entrada_precisa, stop_referencia, justificativa), resultado, confianca, resumo_atualizacao.
+Responda SOMENTE JSON válido com estas chaves: vies_operacional, direcao_a_procurar, autorizacao_m5, gatilho_m1, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, vela_confirmacao_referencia, gatilho, preco_gatilho, condicao_gatilho, reteste_necessario, condicao_reteste, preco_cancelamento, condicao_cancelamento, status_cenario, proximo_passo, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco, margem_stop_explicacao, obstaculos_proximos, decisao, justificativa), m1 (com estado, estrutura_curta, gatilho, entrada_precisa, stop_referencia, justificativa), resultado, confianca, resumo_atualizacao.
 '''
 
 def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type, m1_bytes, m1_type):
@@ -526,7 +552,8 @@ function render(d){
  card('M15 — ESTRUTURA / REGIÃO',line('Contexto',d.m15?.contexto)+line('Estrutura',d.m15?.estrutura)+line('Fase',d.m15?.fase)+line('Região',d.m15?.regiao_importante)+line('Relação com H1',d.m15?.relacao_com_h1))+
  card('POR QUE ESSA ZONA','<p>'+esc(d.por_que_essa_zona)+'</p>')+
  card('DIREÇÃO × AUTORIZAÇÃO',line('Viés operacional',d.vies_operacional||dir)+line('Direção a procurar',dir)+line('M5 — autorização',d.autorizacao_m5||((m.decisao==='GATILHO IDENTIFICADO')?'AUTORIZADO':'BLOQUEADO'))+line('M1 — gatilho',d.gatilho_m1||d.m1?.estado)+line('Regra','Viés indica o lado preferencial; autorização e gatilho indicam se existe entrada.'))+
- card('M5 — PLANO DE ENTRADA',line('Decisão',m.decisao)+line('Situação na zona',m.situacao_na_zona)+line('Rejeição',m.rejeicao)+line('Confirmação',m.confirmacao)+line('Gatilho',m.gatilho)+line('Zona refinada',m.zona_refinada)+line('Stop técnico estrutural',m.stop_tecnico)+line('Stop recomendado (cotação exata)',m.stop_recomendado)+line('Margem do stop',m.margem_stop_explicacao)+line('Entrada planejada',m.entrada_planejada)+line('Primeiro obstáculo (cotação)',m.primeiro_obstaculo_preco)+line('Limites da zona',String(m.zona_limite_inferior??'—')+' até '+String(m.zona_limite_superior??'—'))+line('Risco em preço',m.risco_preco)+line('Espaço até obstáculo',m.espaco_obstaculo_preco)+line('Relação risco-retorno',m.relacao_risco_retorno)+line('Filtro mínimo 2:1',m.filtro_2_1)+line('Motivo do filtro',m.filtro_2_1_motivo)+line('Alvo potencial',m.alvo_potencial)+line('Invalidação',m.invalidacao)+line('Obstáculos próximos',m.obstaculos_proximos)+line('Justificativa',m.justificativa))+
+ card('M5 — PLANO CONDICIONAL: REJEIÇÃO → CONFIRMAÇÃO → GATILHO',line('Status do cenário',m.status_cenario)+line('Rejeição',m.rejeicao)+line('Confirmação',m.confirmacao)+line('Vela de confirmação',m.vela_confirmacao_referencia)+line('Nível/preço do gatilho',m.preco_gatilho)+line('Condição exata do gatilho',m.condicao_gatilho)+line('Precisa de reteste?',m.reteste_necessario)+line('O que validar no reteste',m.condicao_reteste)+line('Preço de cancelamento',m.preco_cancelamento)+line('Condição de cancelamento',m.condicao_cancelamento)+line('Próximo passo',m.proximo_passo))+
+ card('M5 — PLANO DE RISCO E ENTRADA',line('Decisão',m.decisao)+line('Situação na zona',m.situacao_na_zona)+line('Gatilho',m.gatilho)+line('Zona refinada',m.zona_refinada)+line('Stop técnico estrutural',m.stop_tecnico)+line('Stop recomendado (cotação exata)',m.stop_recomendado)+line('Margem do stop',m.margem_stop_explicacao)+line('Entrada planejada',m.entrada_planejada)+line('Primeiro obstáculo (cotação)',m.primeiro_obstaculo_preco)+line('Limites da zona',String(m.zona_limite_inferior??'—')+' até '+String(m.zona_limite_superior??'—'))+line('Risco em preço',m.risco_preco)+line('Espaço até obstáculo',m.espaco_obstaculo_preco)+line('Relação risco-retorno',m.relacao_risco_retorno)+line('Filtro mínimo 2:1',m.filtro_2_1)+line('Motivo do filtro',m.filtro_2_1_motivo)+line('Alvo potencial',m.alvo_potencial)+line('Invalidação',m.invalidacao)+line('Obstáculos próximos',m.obstaculos_proximos)+line('Justificativa',m.justificativa))+
  card('M1 — GATILHO DE ENTRADA',line('Estado',d.m1?.estado)+line('Estrutura curta',d.m1?.estrutura_curta)+line('Gatilho',d.m1?.gatilho)+line('Entrada precisa',d.m1?.entrada_precisa)+line('Stop de referência',d.m1?.stop_referencia)+line('Justificativa',d.m1?.justificativa))+
   card('RESULTADO E CONFIANÇA',line('Resumo',d.resultado)+line('Confiança visual',d.confianca))+'</div></div>';
 }
