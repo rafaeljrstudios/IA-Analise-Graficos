@@ -73,10 +73,15 @@ LEITURA DO M15:
 - Procure a região onde uma continuação coerente com H1 poderia acontecer.
 - Se H1 e M15 estiverem conflitantes ou sem estrutura suficiente, prefira AGUARDAR.
 
-DIREÇÃO:
-- H1 + M15 alinhados para alta → procurar COMPRA.
-- H1 + M15 alinhados para baixa → procurar VENDA.
-- Sem alinhamento claro → AGUARDAR.
+DIREÇÃO E AUTORIZAÇÃO (NÃO CONFUNDA):
+- "vies_operacional" representa somente o lado que deve ser observado: COMPRA, VENDA ou NEUTRO.
+- H1 + M15 alinhados para alta → vies_operacional = COMPRA.
+- H1 + M15 alinhados para baixa → vies_operacional = VENDA.
+- H1/M15 conflitantes ou sem estrutura suficiente → vies_operacional = NEUTRO.
+- "direcao_a_procurar" deve repetir COMPRA ou VENDA quando houver viés claro, mesmo que ainda não exista entrada. Use AGUARDAR somente quando o viés for NEUTRO.
+- "autorizacao_m5" deve ser AUTORIZADO somente quando o M5 mostrar reação/estrutura válida na direção do viés; caso contrário BLOQUEADO.
+- "gatilho_m1" deve ser IDENTIFICADO somente quando o M5 estiver AUTORIZADO e o M1 mostrar gatilho objetivo; caso contrário AGUARDAR ou BLOQUEADO.
+- A decisão de entrada continua separada: viés VENDA não significa vender imediatamente; viés COMPRA não significa comprar imediatamente.
 
 ZONA DE INTERESSE:
 - É a região de preço onde vale observar o comportamento do mercado.
@@ -118,7 +123,10 @@ Use exatamente estas chaves:
     "regiao_importante": "",
     "relacao_com_h1": ""
   },
+  "vies_operacional": "COMPRA | VENDA | NEUTRO",
   "direcao_a_procurar": "COMPRA | VENDA | AGUARDAR",
+  "autorizacao_m5": "AUTORIZADO | BLOQUEADO",
+  "gatilho_m1": "IDENTIFICADO | AGUARDAR | BLOQUEADO",
   "zona_de_interesse": "",
   "primeiro_obstaculo": "",
   "por_que_essa_zona": "",
@@ -387,12 +395,19 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type, m
 M5_UPDATE_PROMPT = r'''Você é um analista técnico de Forex atualizando um plano já existente usando novas capturas M5 e M1.
 Você receberá o JSON da análise principal H1/M15/M5/M1 e NOVAS imagens M5 e M1.
 Não refaça nem apague o contexto H1/M15 original. Use-o como referência, mas avalie a situação atual do preço com honestidade.
+IMPORTANTE: atualize explicitamente o viés operacional. Separe VIÉS de AUTORIZAÇÃO DE ENTRADA:
+- vies_operacional = COMPRA se H1/M15 continuam favorecendo alta; VENDA se H1/M15 favorecem baixa ou se houver mudança estrutural suficientemente confirmada; NEUTRO se conflitantes/indefinidos.
+- Não mantenha automaticamente o viés antigo: verifique se o rompimento atual invalidou a estrutura/zona anterior. Explique se é correção ou mudança estrutural e qual evidência sustenta isso.
+- direcao_a_procurar deve mostrar COMPRA ou VENDA quando houver lado preferencial, mesmo com entrada bloqueada. Use AGUARDAR apenas se não houver viés confiável.
+- autorizacao_m5 = AUTORIZADO somente se M5 confirmar reação/estrutura utilizável na direção do viés; caso contrário BLOQUEADO.
+- gatilho_m1 = IDENTIFICADO somente se M5 estiver autorizado e M1 apresentar gatilho objetivo; caso contrário AGUARDAR/BLOQUEADO.
+- Nunca transforme viés vendedor em ordem de venda imediata; após movimento esticado, exija reteste e novo gatilho.
 Identifique se a zona antiga ainda vale, se houve rompimento, falso rompimento, pullback ou mudança da estrutura local. Não force a direção original se o preço a invalidou. Um movimento contrário no M5 pode ser correção, não declare reversão sem evidência.
 Procure novas zonas refinadas somente se visíveis. Informe gatilho, stop técnico estrutural e STOP RECOMENDADO além de TODA a zona refinada com margem de segurança, alvo potencial e primeiro obstáculo.
 Para compra, stop recomendado abaixo do limite inferior da zona; para venda, acima do limite superior. Informe cotações numéricas apenas quando legíveis; caso contrário use null.
 Inclua zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco e margem_stop_explicacao.
 O M5 valida reação e estrutura; o M1 apenas procura o gatilho preciso depois da validação M5. Se M5 não validar, M1 deve ficar BLOQUEADO. Não use M1 para contrariar H1/M15. O servidor calculará R:R; não invente valores nem declare aprovação sem os preços. Se não houver evidência suficiente, AGUARDAR. O plano é condicional, não garantia.
-Responda SOMENTE JSON válido com estas chaves: direcao_a_procurar, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco, margem_stop_explicacao, obstaculos_proximos, decisao, justificativa), m1 (com estado, estrutura_curta, gatilho, entrada_precisa, stop_referencia, justificativa), resultado, confianca, resumo_atualizacao.
+Responda SOMENTE JSON válido com estas chaves: vies_operacional, direcao_a_procurar, autorizacao_m5, gatilho_m1, zona_de_interesse, primeiro_obstaculo, por_que_essa_zona, m5 (com situacao_na_zona, rejeicao, confirmacao, gatilho, zona_refinada, stop_tecnico, alvo_potencial, invalidacao, zona_limite_inferior, zona_limite_superior, entrada_planejada, stop_recomendado, primeiro_obstaculo_preco, margem_stop_explicacao, obstaculos_proximos, decisao, justificativa), m1 (com estado, estrutura_curta, gatilho, entrada_precisa, stop_referencia, justificativa), resultado, confianca, resumo_atualizacao.
 '''
 
 def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type, m1_bytes, m1_type):
@@ -435,7 +450,7 @@ def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type, m1_bytes, m1_type)
                 if not isinstance(upd, dict) or not isinstance(upd.get('m5'), dict):
                     raise ValueError('Resposta de atualização sem o plano M5 esperado.')
                 merged = dict(analise_principal)
-                for key in ('direcao_a_procurar','zona_de_interesse','primeiro_obstaculo','por_que_essa_zona','resultado','confianca'):
+                for key in ('vies_operacional','direcao_a_procurar','autorizacao_m5','gatilho_m1','zona_de_interesse','primeiro_obstaculo','por_que_essa_zona','resultado','confianca'):
                     if key in upd:
                         merged[key] = upd[key]
                 merged['m5'] = upd['m5']
@@ -510,6 +525,7 @@ function render(d){
  card('H1 — CONTEXTO',line('Contexto',d.h1?.contexto)+line('Estrutura',d.h1?.estrutura)+line('Fase',d.h1?.fase)+line('Níveis',d.h1?.principais_niveis))+
  card('M15 — ESTRUTURA / REGIÃO',line('Contexto',d.m15?.contexto)+line('Estrutura',d.m15?.estrutura)+line('Fase',d.m15?.fase)+line('Região',d.m15?.regiao_importante)+line('Relação com H1',d.m15?.relacao_com_h1))+
  card('POR QUE ESSA ZONA','<p>'+esc(d.por_que_essa_zona)+'</p>')+
+ card('DIREÇÃO × AUTORIZAÇÃO',line('Viés operacional',d.vies_operacional||dir)+line('Direção a procurar',dir)+line('M5 — autorização',d.autorizacao_m5||((m.decisao==='GATILHO IDENTIFICADO')?'AUTORIZADO':'BLOQUEADO'))+line('M1 — gatilho',d.gatilho_m1||d.m1?.estado)+line('Regra','Viés indica o lado preferencial; autorização e gatilho indicam se existe entrada.'))+
  card('M5 — PLANO DE ENTRADA',line('Decisão',m.decisao)+line('Situação na zona',m.situacao_na_zona)+line('Rejeição',m.rejeicao)+line('Confirmação',m.confirmacao)+line('Gatilho',m.gatilho)+line('Zona refinada',m.zona_refinada)+line('Stop técnico estrutural',m.stop_tecnico)+line('Stop recomendado (cotação exata)',m.stop_recomendado)+line('Margem do stop',m.margem_stop_explicacao)+line('Entrada planejada',m.entrada_planejada)+line('Primeiro obstáculo (cotação)',m.primeiro_obstaculo_preco)+line('Limites da zona',String(m.zona_limite_inferior??'—')+' até '+String(m.zona_limite_superior??'—'))+line('Risco em preço',m.risco_preco)+line('Espaço até obstáculo',m.espaco_obstaculo_preco)+line('Relação risco-retorno',m.relacao_risco_retorno)+line('Filtro mínimo 2:1',m.filtro_2_1)+line('Motivo do filtro',m.filtro_2_1_motivo)+line('Alvo potencial',m.alvo_potencial)+line('Invalidação',m.invalidacao)+line('Obstáculos próximos',m.obstaculos_proximos)+line('Justificativa',m.justificativa))+
  card('M1 — GATILHO DE ENTRADA',line('Estado',d.m1?.estado)+line('Estrutura curta',d.m1?.estrutura_curta)+line('Gatilho',d.m1?.gatilho)+line('Entrada precisa',d.m1?.entrada_precisa)+line('Stop de referência',d.m1?.stop_referencia)+line('Justificativa',d.m1?.justificativa))+
   card('RESULTADO E CONFIANÇA',line('Resumo',d.resultado)+line('Confiança visual',d.confianca))+'</div></div>';
