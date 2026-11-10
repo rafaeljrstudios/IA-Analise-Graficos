@@ -159,9 +159,8 @@ Use exatamente estas chaves:
 '''
 
 MODELS = [
-    # Uma chamada principal e apenas uma alternativa, para evitar longas filas de tentativas.
-    ('gemini-3.7-flash', 1),
-    ('gemini-3.8-flash', 1),
+    # Uma única chamada por operação para reduzir o consumo da cota gratuita.
+    ('gemini-3.5-flash-lite', 1),
 ]
 
 REQUEST_TIMEOUT = 45
@@ -349,9 +348,15 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type, m
                 detail = e.read().decode('utf-8', errors='replace')
                 last_error = f'{model} HTTP {e.code}: {detail[:700]}'
 
-                # 429/5xx são transitórios. Tentamos novamente com backoff e,
-                # depois, passamos ao próximo modelo da lista.
-                if e.code in (429, 500, 502, 503, 504):
+                # 429 é limite de cota: não repetir nem chamar outro modelo.
+                if e.code == 429:
+                    raise RuntimeError(
+                        'O Gemini informou limite de solicitações (HTTP 429). '
+                        'Esta operação fez uma única chamada. Aguarde a renovação da cota '
+                        'e tente novamente mais tarde. Detalhe: ' + detail[:500]
+                    )
+                # Para indisponibilidade temporária, não há repetição nesta configuração.
+                if e.code in (500, 502, 503, 504):
                     if attempt < retries - 1:
                         time.sleep(retry_delay(e.headers, attempt))
                         continue
@@ -373,7 +378,7 @@ def gemini_analisar(h1_bytes, h1_type, m15_bytes, m15_type, m5_bytes, m5_type, m
                 break
 
     raise RuntimeError(
-        'Gemini temporariamente indisponível após tentativas nos modelos de reserva. '
+        'Gemini temporariamente indisponível. Foi feita apenas uma chamada nesta operação. '
         'Tente novamente em alguns segundos. Último detalhe: ' +
         (last_error or 'sem detalhe')
     )
@@ -440,9 +445,14 @@ def gemini_atualizar_m5(analise_principal, m5_bytes, m5_type, m1_bytes, m1_type)
                 merged['resumo_atualizacao'] = upd.get('resumo_atualizacao', 'Plano M5/M1 atualizado com as novas imagens.')
                 return merged
             except urllib.error.HTTPError as e:
-                last_error = f'{model} HTTP {e.code}: {e.read().decode("utf-8", errors="replace")[:500]}'
-                if e.code in (429,500,502,503,504) and attempt < retries-1:
-                    time.sleep(retry_delay(e.headers, attempt)); continue
+                detail = e.read().decode("utf-8", errors="replace")
+                last_error = f'{model} HTTP {e.code}: {detail[:500]}'
+                if e.code == 429:
+                    raise RuntimeError(
+                        'O Gemini informou limite de solicitações (HTTP 429). '
+                        'Esta atualização fez uma única chamada. Aguarde a renovação da cota '
+                        'e tente novamente mais tarde. Detalhe: ' + detail[:350]
+                    )
                 break
             except (urllib.error.URLError, TimeoutError, KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError) as e:
                 last_error = f'{model}: {e}'
